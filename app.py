@@ -57,12 +57,28 @@ def finalizar_chamado(id_chamado, acao_desc):
         df.at[idx[0], 'Minutos'] = diff_minutos
         df.to_csv(DB_FILE, index=False)
 
-# --- CSS ---
+# --- CSS CORRIGIDO PARA PISCAR EM TODO O APP ---
 st.markdown("""
     <style>
-    @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #ff8e8e; } 100% { background-color: #ff4b4b; } }
-    .piscante { animation: piscar 1s infinite; padding: 15px; border-radius: 10px; color: white; text-align: center; font-weight: bold; }
-    div.stButton > button:first-child { width: 100%; height: 50px; font-weight: bold; }
+    @keyframes piscar {
+        0% { background-color: #ff4b4b; }
+        50% { background-color: #9e0000; }
+        100% { background-color: #ff4b4b; }
+    }
+    .piscante {
+        animation: piscar 1s infinite;
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    div.stButton > button:first-child {
+        width: 100%;
+        height: 50px;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -80,7 +96,6 @@ with aba_op:
     col_a, col_b = st.columns(2)
     sel_ups = col_a.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
     
-    # Verifica se há chamado aberto para a célula selecionada
     chamado_aberto = ativos[ativos['Célula'] == sel_ups]
     
     if chamado_aberto.empty:
@@ -91,12 +106,15 @@ with aba_op:
                 salvar_chamado(sel_ups, sel_motivo, desc)
                 st.rerun()
     else:
-        # Mostra o motivo pelo qual está aguardando
+        # AGORA MOSTRA MOTIVO E DESCRIÇÃO QUE O OPERADOR ESCREVEU
         motivo_atual = chamado_aberto.iloc[0]['Motivo']
+        desc_atual = chamado_aberto.iloc[0]['Descrição']
         st.markdown(f"""
             <div class="piscante">
                 <h1>⏳ AGUARDANDO ASSISTENTE...</h1>
-                <p style='font-size: 20px;'>Célula {sel_ups} parada por: <b>{motivo_atual}</b></p>
+                <p style='font-size: 22px;'>Célula: <b>{sel_ups}</b></p>
+                <p style='font-size: 18px;'>Motivo: <b>{motivo_atual}</b></p>
+                <p style='font-size: 16px;'>O que você escreveu: <i>"{desc_atual}"</i></p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -108,6 +126,22 @@ with aba_as:
     media_tempo = resolvidos_hoje['Minutos'].mean() if not resolvidos_hoje.empty else 0.0
     c3.metric("⏱️ MÉDIA (MIN)", f"{media_tempo:.1f}")
     
+    if not ativos.empty:
+        # TÍTULO PISCANTE NO PAINEL DA ASSISTENTE
+        st.markdown('<div class="piscante"><h2>⚠️ ATENÇÃO: HÁ CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
+        
+        for i, row in ativos.iterrows():
+            with st.expander(f"🚨 {row['Célula']} - {row['Motivo']}", expanded=True):
+                st.write(f"**Descrição do Operador:** {row['Descrição']}")
+                txt_acao = st.text_input(f"O que foi feito? (ID {row['ID']})", key=f"ac_{row['ID']}")
+                if st.button(f"✅ Finalizar {row['ID']}", key=f"bt_{row['ID']}"):
+                    if txt_acao: 
+                        finalizar_chamado(row['ID'], txt_acao)
+                        st.rerun()
+    else:
+        st.info("✅ Sem pendências no momento.")
+    
+    st.divider()
     with st.expander("🗑️ Opções de Limpeza"):
         confirma = st.checkbox("Eu quero zerar os chamados de hoje.")
         if st.button("Zerar Contagem de Hoje"):
@@ -116,21 +150,8 @@ with aba_as:
                 df_limpo.to_csv(DB_FILE, index=False)
                 st.rerun()
 
-    st.divider()
-    
-    if not ativos.empty:
-        for i, row in ativos.iterrows():
-            with st.expander(f"🚨 {row['Célula']} - {row['Motivo']}", expanded=True):
-                st.write(f"**Problema:** {row['Descrição']}")
-                txt_acao = st.text_input(f"O que foi feito? (ID {row['ID']})", key=f"ac_{row['ID']}")
-                if st.button(f"✅ Finalizar {row['ID']}", key=f"bt_{row['ID']}"):
-                    if txt_acao: 
-                        finalizar_chamado(row['ID'], txt_acao)
-                        st.rerun()
-    else: st.info("✅ Sem pendências.")
-    
-    st.divider()
-    # AJUSTE DE LARGURA DE COLUNA (ID e Célula pequenos)
+    st.subheader("Histórico Recente")
+    # LARGURAS AJUSTADAS: ID e Célula pequenos
     st.dataframe(
         dados_completos.sort_values(by="ID", ascending=False), 
         use_container_width=True, 
@@ -138,7 +159,8 @@ with aba_as:
         column_config={
             "ID": st.column_config.Column(width="small"),
             "Célula": st.column_config.Column(width="small"),
-            "Status": st.column_config.Column(width="medium")
+            "Status": st.column_config.Column(width="medium"),
+            "Minutos": st.column_config.Column(width="small")
         }
     )
 
