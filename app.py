@@ -5,15 +5,41 @@ import os
 import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
 
-# Configuração e Auto-Refresh
+# Configuração e Auto-Refresh (30 segundos)
 st.set_page_config(page_title="Andon Digital - NHS", page_icon="🚨", layout="wide")
 st_autorefresh(interval=30000, key="datarefresh")
 
 DB_FILE = "registro_paradas.csv"
 SENHA_ADMIN = "12345"
 
+# --- FUNÇÃO HORÁRIO BRASÍLIA ---
 def get_brasil_time():
     return datetime.utcnow() - timedelta(hours=3)
+
+# --- CSS PARA O EFEITO PISCANTE (OBRIGATÓRIO NO TOPO) ---
+st.markdown("""
+    <style>
+    @keyframes piscar {
+        0% { background-color: #ff4b4b; }
+        50% { background-color: #7d0000; }
+        100% { background-color: #ff4b4b; }
+    }
+    .piscante {
+        animation: piscar 1s infinite;
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    div.stButton > button:first-child {
+        width: 100%;
+        height: 50px;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- CARGA E PADRONIZAÇÃO DE DADOS ---
 def carregar_dados():
@@ -21,7 +47,7 @@ def carregar_dados():
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
     try:
         df = pd.read_csv(DB_FILE)
-        # Padroniza todas as datas para o formato Brasil para o filtro funcionar 100%
+        # Padroniza Datas
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.strftime('%d/%m/%Y')
         df = df.dropna(subset=['Data'])
         if "Minutos" not in df.columns: df["Minutos"] = 0.0
@@ -53,8 +79,14 @@ with aba_op:
                 pd.concat([dados_completos, novo], ignore_index=True).to_csv(DB_FILE, index=False)
                 st.rerun()
     else:
-        st.error(f"⚠️ AGUARDANDO ASSISTENTE PARA {sel_ups}")
-        st.info(f"Relato: {chamado_aberto.iloc[0]['Descrição']}")
+        # AVISO PISCANTE NO OPERADOR
+        st.markdown(f"""
+            <div class="piscante">
+                <h1>⏳ AGUARDANDO ASSISTENTE...</h1>
+                <p style='font-size: 20px;'>Motivo: {chamado_aberto.iloc[0]['Motivo']}</p>
+                <p>Relato: {chamado_aberto.iloc[0]['Descrição']}</p>
+            </div>
+        """, unsafe_allow_html=True)
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
@@ -63,17 +95,12 @@ with aba_as:
     m2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
     m3.metric("⏱️ MÉDIA (MIN)", f"{resolvidos_hoje['Minutos'].mean():.1f}" if not resolvidos_hoje.empty else "0.0")
 
-    with st.expander("🗑️ Opções de Limpeza"):
-        if st.checkbox("Confirmar exclusão de hoje?", key="chk_final"):
-            if st.button("ZERAR TUDO DE HOJE"):
-                df_reset = dados_completos[dados_completos['Data'] != hoje_br]
-                df_reset.to_csv(DB_FILE, index=False)
-                st.rerun()
-
     if not ativos.empty:
+        # AVISO PISCANTE NA ASSISTENTE
+        st.markdown('<div class="piscante"><h2>⚠️ ATENÇÃO: HÁ CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
         for i, row in ativos.iterrows():
             with st.expander(f"🚨 {row['Célula']} ({row['Início']})", expanded=True):
-                st.write(f"Problema: {row['Descrição']}")
+                st.write(f"**Problema:** {row['Descrição']}")
                 acao = st.text_input("O que foi feito?", key=f"re_{row['ID']}")
                 if st.button(f"Finalizar {row['ID']}", key=f"f_{row['ID']}"):
                     if acao:
@@ -87,32 +114,50 @@ with aba_as:
                         df_f.at[idx[0], 'Minutos'] = round((h2 - h1).total_seconds() / 60, 1)
                         df_f.to_csv(DB_FILE, index=False)
                         st.rerun()
-    
-    st.divider()
-    st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ Tudo em ordem por aqui!")
 
-# --- ABA 3: INDICADORES (COM TRAVA ANTI-ERRO) ---
+    with st.expander("🗑️ Opções de Limpeza"):
+        if st.checkbox("Confirmar exclusão de hoje?", key="chk_final"):
+            if st.button("ZERAR CONTRETAGEM DE HOJE"):
+                df_reset = dados_completos[dados_completos['Data'] != hoje_br]
+                df_reset.to_csv(DB_FILE, index=False)
+                st.rerun()
+
+# --- ABA 3: INDICADORES (FILTROS RECUPERADOS) ---
 with aba_ind:
+    st.subheader("Filtros e Análise")
     if not dados_completos.empty:
-        datas_lista = sorted(list(set(dados_completos['Data'].unique())), reverse=True)
-        sel_d = st.multiselect("Filtrar Datas:", datas_lista, default=[hoje_br] if hoje_br in datas_lista else [])
-        df_ind = dados_completos[dados_completos['Data'].isin(sel_d)]
+        f_col1, f_col2 = st.columns(2)
         
-        # AQUI ESTÁ A TRAVA QUE RESOLVE O SEU ERRO:
+        # Filtro de Data
+        lista_datas = sorted(list(set(dados_completos['Data'].unique())), reverse=True)
+        sel_d = f_col1.multiselect("Filtrar Datas:", lista_datas, default=[hoje_br] if hoje_br in lista_datas else [])
+        
+        # Filtro de Célula
+        lista_ups = sorted(dados_completos['Célula'].unique())
+        sel_ups_ind = f_col2.multiselect("Filtrar Células (vazio=todas):", lista_ups)
+
+        df_ind = dados_completos.copy()
+        if sel_d:
+            df_ind = df_ind[df_ind['Data'].isin(sel_d)]
+        if sel_ups_ind:
+            df_ind = df_ind[df_ind['Célula'].isin(sel_ups_ind)]
+
         if not df_ind.empty:
             g1, g2 = st.columns(2)
             with g1:
-                # Contagem de ocorrências por célula
                 contagem = df_ind['Célula'].value_counts().reset_index()
                 contagem.columns = ['Célula', 'Qtd']
-                fig_bar = px.bar(contagem, x='Célula', y='Qtd', title="Quantidade por UPS", color_discrete_sequence=['#ff4b4b'])
-                st.plotly_chart(fig_bar, use_container_width=True)
+                st.plotly_chart(px.bar(contagem, x='Célula', y='Qtd', title="Quantidade por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
             with g2:
                 st.plotly_chart(px.pie(df_ind, names='Motivo', title="Distribuição por Motivo", hole=0.4), use_container_width=True)
+            
+            st.dataframe(df_ind.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
         else:
-            st.info("ℹ️ Nenhum dado para exibir com os filtros selecionados.")
+            st.info("ℹ️ Selecione filtros para ver os gráficos.")
     
-    with st.expander("🛠️ RESET TOTAL"):
+    with st.expander("🛠️ ADMINISTRAÇÃO"):
         if st.text_input("Senha Admin", type="password") == SENHA_ADMIN:
             if st.button("LIMPAR TODO O HISTÓRICO"):
                 if os.path.exists(DB_FILE): os.remove(DB_FILE)
