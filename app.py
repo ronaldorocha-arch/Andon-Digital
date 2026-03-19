@@ -94,7 +94,8 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
     if aberto.empty:
         lista_problemas = [
             "Falta de Matéria-prima", 
-            "Qualidade da Matéria-prima", 
+            "Qualidade da Matéria-prima",
+            "Composer",
             "Falha de Abastecimento", 
             "Problema de Processo", 
             "Manutenção Equipamento",
