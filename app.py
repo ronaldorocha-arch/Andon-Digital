@@ -23,21 +23,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza a cada 5 segundos
 st_autorefresh(interval=5000, key="datarefresh")
 
-# --- 2. CONTROLE DE SESSÃO ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'pagina_ativa' not in st.session_state:
     st.session_state.pagina_ativa = "📲 Terminal Operador"
 
 SENHA = "12345"
-
 def get_br_time():
     return datetime.utcnow() - timedelta(hours=3)
 
-# --- 3. ESTILO CSS ---
+# --- 2. ESTILO CSS ---
 st.markdown("""
     <style>
     @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
@@ -48,7 +45,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. FUNÇÕES DE DADOS ---
+# --- 3. FUNÇÕES DE DADOS ---
 def carregar_dados():
     if not os.path.exists(DB_FILE):
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
@@ -60,14 +57,17 @@ def carregar_dados():
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
 
-# --- AJUSTE DE SOM (VERSÃO COMPATÍVEL) ---
+# --- SOM (BIP INTERNO) ---
 if tem_parada:
-    # Usando um som de alerta curto e público que costuma pular filtros de firewall
     st.markdown("""
-        <iframe src="https://www.asite.com/audio/alert.mp3" allow="autoplay" style="display:none" id="iframeAudio"></iframe>
-        <audio autoplay>
-            <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mp3">
-        </audio>
+        <script>
+        var context = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = context.createOscillator();
+        osc.frequency.setValueAtTime(880, context.currentTime);
+        osc.connect(context.destination);
+        osc.start();
+        setTimeout(function(){ osc.stop(); }, 300);
+        </script>
         """, unsafe_allow_html=True)
 
 dados = carregar_dados()
@@ -75,14 +75,14 @@ hoje = get_br_time().strftime("%d/%m/%Y")
 ativos = dados[dados['Status'] == "🔴 Aberto"]
 resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
 
-# --- 5. MENU DE NAVEGAÇÃO ---
+# --- 4. MENU DE NAVEGAÇÃO ---
 menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
 index_salvo = menu.index(st.session_state.pagina_ativa) if st.session_state.pagina_ativa in menu else 0
 escolha = st.radio("Selecione o Painel:", menu, horizontal=True, index=index_salvo)
 st.session_state.pagina_ativa = escolha
 st.divider()
 
-# --- LOGICA DAS PÁGINAS ---
+# --- 5. LÓGICA DAS PÁGINAS ---
 
 if st.session_state.pagina_ativa == "📲 Terminal Operador":
     st.subheader("Registrar Nova Parada")
@@ -90,17 +90,32 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
     ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
     sel_ups = c1.selectbox("Célula", ups)
     aberto = ativos[ativos['Célula'] == sel_ups]
+    
     if aberto.empty:
-        motivo = c2.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Problemas com EP", "Outros"])
-        desc = st.text_area("O que aconteceu?")
-        if st.button("🔔 CHAMAR AGORA", type="primary"):
-            if desc:
-                nid = dados['ID'].max() + 1 if not dados.empty else 1
-                novo = pd.DataFrame([{"ID": int(nid), "Célula": sel_ups, "Motivo": motivo, "Descrição": desc, "Início": get_br_time().strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto", "Data": hoje, "Ação": "-", "Minutos": 0.0}])
-                pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
-                st.rerun()
+        # MOTIVOS PRÉ-DEFINIDOS
+        lista_problemas = [
+            "Falta de Matéria-prima", 
+            "Qualidade da Matéria-prima", 
+            "Falha de Abastecimento", 
+            "Problema de Processo", 
+            "Manutenção Equipamento",
+            "Outros"
+        ]
+        motivo_selecionado = c2.selectbox("Qual o problema?", lista_problemas)
+        
+        # Só mostra campo de texto se selecionar "Outros"
+        desc_adicional = ""
+        if motivo_selecionado == "Outros":
+            desc_adicional = st.text_input("Especifique o problema:")
+        
+        if st.button("🔔 ENVIAR CHAMADO", type="primary"):
+            final_desc = desc_adicional if motivo_selecionado == "Outros" else motivo_selecionado
+            nid = dados['ID'].max() + 1 if not dados.empty else 1
+            novo = pd.DataFrame([{"ID": int(nid), "Célula": sel_ups, "Motivo": motivo_selecionado, "Descrição": final_desc, "Início": get_br_time().strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto", "Data": hoje, "Ação": "-", "Minutos": 0.0}])
+            pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
+            st.rerun()
     else:
-        st.markdown(f'<div class="alerta-piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Motivo: {aberto.iloc[0]["Motivo"]}</p><p>Obs: {aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alerta-piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Problema: {aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
 
 elif st.session_state.pagina_ativa == "💻 Painel Assistente":
     if not st.session_state.logado:
@@ -117,19 +132,20 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
         if not ativos.empty:
             st.markdown('<div class="alerta-piscante">⚠️ ATENÇÃO: HÁ CHAMADOS PENDENTES!</div>', unsafe_allow_html=True)
             for i, r in ativos.iterrows():
-                with st.expander(f"Chamado: {r['Célula']} - {r['Motivo']}", expanded=True):
-                    st.write(f"Relato: {r['Descrição']}")
-                    ac = st.text_input("Ação Tomada", key=f"ac_{r['ID']}")
-                    if st.button(f"Finalizar #{r['ID']}", key=f"f_{r['ID']}"):
-                        if ac:
-                            df_f = pd.read_csv(DB_FILE)
-                            idx = df_f[df_f['ID'] == r['ID']].index
-                            ag = get_br_time()
-                            h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
-                            df_f.at[idx[0], 'Fim'] = ag.strftime("%H:%M:%S")
-                            df_f.at[idx[0], 'Status'] = "🟢 Finalizado"; df_f.at[idx[0], 'Ação'] = ac
-                            df_f.at[idx[0], 'Minutos'] = round((ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60, 1)
-                            df_f.to_csv(DB_FILE, index=False); st.rerun()
+                with st.expander(f"Célula: {r['Célula']} - Problema: {r['Descrição']}", expanded=True):
+                    # Ação é opcional
+                    ac = st.text_input("Ação Tomada (Opcional):", key=f"ac_{r['ID']}")
+                    if st.button(f"Concluir Atendimento #{r['ID']}", key=f"f_{r['ID']}"):
+                        df_f = pd.read_csv(DB_FILE)
+                        idx = df_f[df_f['ID'] == r['ID']].index
+                        ag = get_br_time()
+                        h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
+                        df_f.at[idx[0], 'Fim'] = ag.strftime("%H:%M:%S")
+                        df_f.at[idx[0], 'Status'] = "🟢 Finalizado"
+                        # Se não escreveu nada, salva como "Concluído"
+                        df_f.at[idx[0], 'Ação'] = ac if ac else "Atendimento Concluído"
+                        df_f.at[idx[0], 'Minutos'] = round((ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60, 1)
+                        df_f.to_csv(DB_FILE, index=False); st.rerun()
         else: st.success("✅ Tudo em ordem!")
 
 elif st.session_state.pagina_ativa == "📊 Indicadores":
@@ -140,17 +156,13 @@ elif st.session_state.pagina_ativa == "📊 Indicadores":
             d_list = sorted(list(set(dados['Data'].unique())), reverse=True)
             s_d = c_f1.multiselect("Datas:", d_list, default=[hoje] if hoje in d_list else [])
             s_u = c_f2.multiselect("Células:", sorted(dados['Célula'].unique()))
-            
             df_i = dados.copy()
             if s_d: df_i = df_i[df_i['Data'].isin(s_d)]
             if s_u: df_i = df_i[df_i['Célula'].isin(s_u)]
-            
             if not df_i.empty:
                 g1, g2 = st.columns(2)
                 with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
                 with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
-            else: st.info("Selecione filtros para ver os gráficos.")
-    else: st.warning("🔒 Faça login no Painel Assistente.")
 
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
