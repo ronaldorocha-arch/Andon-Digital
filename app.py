@@ -6,7 +6,7 @@ import os
 # Configuração da Página
 st.set_page_config(page_title="Andon Digital - NHS", page_icon="🚨", layout="wide")
 
-# Nome do arquivo que guardará os registros
+# Nome do arquivo de banco de dados local
 DB_FILE = "registro_paradas.csv"
 
 # Inicializar o arquivo se não existir
@@ -15,7 +15,10 @@ if not os.path.exists(DB_FILE):
     df_init.to_csv(DB_FILE, index=False)
 
 def carregar_dados():
-    return pd.read_csv(DB_FILE)
+    try:
+        return pd.read_csv(DB_FILE)
+    except:
+        return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status"])
 
 def salvar_chamado(celula, motivo, desc):
     df = carregar_dados()
@@ -36,7 +39,7 @@ def finalizar_chamado(id_chamado):
         df.at[idx[0], 'Status'] = "🟢 Finalizado"
         df.to_csv(DB_FILE, index=False)
 
-# Interface
+# --- INTERFACE ---
 st.title("🚨 Sistema Andon - Tecnologia de Processos")
 
 aba_op, aba_as = st.tabs(["📲 Terminal do Operador", "💻 Painel da Assistente"])
@@ -49,12 +52,14 @@ with aba_op:
     with col2:
         sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
-    desc = st.text_area("O que aconteceu?")
-    if st.button("🔔 CHAMAR ASSISTENTE", use_container_width=True, type="primary"):
+    desc = st.text_area("O que aconteceu?", placeholder="Ex: Falta de dissipador...")
+    if st.button("🔔 CHAMAR ASSISTENTE", type="primary", width=None): # Corrigido aqui
         if desc:
             salvar_chamado(sel_ups, sel_motivo, desc)
-            st.success("Chamado enviado!")
+            st.success("Chamado enviado com sucesso!")
             st.rerun()
+        else:
+            st.warning("Descreva o problema.")
 
 with aba_as:
     st.subheader("Chamados Ativos")
@@ -62,15 +67,19 @@ with aba_as:
     ativos = dados[dados['Status'] == "🔴 Aberto"]
     
     if ativos.empty:
-        st.info("Tudo em ordem nas linhas.")
+        st.info("Nenhuma parada registrada no momento.")
     else:
         for i, row in ativos.iterrows():
             with st.expander(f"⚠️ {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
-                st.write(f"Detalhe: {row['Descrição']}")
-                if st.button(f"Concluir Chamado {row['ID']}", key=f"btn_{row['ID']}"):
+                st.write(f"**Detalhe:** {row['Descrição']}")
+                if st.button(f"✅ Concluir Chamado {row['ID']}", key=f"btn_{row['ID']}"):
                     finalizar_chamado(row['ID'])
                     st.rerun()
     
     st.divider()
     st.subheader("Histórico de Paradas")
-    st.dataframe(dados, use_container_width=True, hide_index=True)
+    # Corrigido width aqui também
+    st.dataframe(dados, hide_index=True) 
+
+# Estilo para botões grandes
+st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-weight: bold; font-size: 20px; }</style>""", unsafe_allow_html=True)
