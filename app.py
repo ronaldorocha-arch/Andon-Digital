@@ -23,9 +23,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza a cada 5 segundos
+# Atualiza a cada 5 segundos para resposta rápida
 st_autorefresh(interval=5000, key="datarefresh")
 
+# --- 2. CONTROLE DE SESSÃO ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'pagina_ativa' not in st.session_state:
@@ -36,7 +37,7 @@ SENHA = "12345"
 def get_br_time():
     return datetime.utcnow() - timedelta(hours=3)
 
-# --- 2. ESTILO CSS ---
+# --- 3. ESTILO CSS ---
 st.markdown("""
     <style>
     @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
@@ -47,7 +48,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNÇÕES DE DADOS ---
+# --- 4. FUNÇÕES DE DADOS ---
 def carregar_dados():
     if not os.path.exists(DB_FILE):
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
@@ -59,28 +60,24 @@ def carregar_dados():
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
 
-# --- 4. LÓGICA DO SOM (NOVO LINK E TESTE) ---
 if tem_parada:
-    # Som de campainha de balcão (curto e nítido)
-    url_som = "https://www.soundjay.com/buttons/sounds/button-3.mp3"
-    st.markdown(f"""
-        <audio autoplay>
-            <source src="{url_som}" type="audio/mp3">
-        </audio>
-        """, unsafe_allow_html=True)
+    st.markdown("<audio autoplay><source src='https://raw.githubusercontent.com/rafaelpernil2/beat-detector/master/resources/sounds/bell.mp3' type='audio/mp3'></audio>", unsafe_allow_html=True)
 
 dados = carregar_dados()
 hoje = get_br_time().strftime("%d/%m/%Y")
 ativos = dados[dados['Status'] == "🔴 Aberto"]
 resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
 
-# --- 5. MENU ---
+# --- 5. MENU DE NAVEGAÇÃO ---
 menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
-escolha = st.radio("Selecione o Painel:", menu, horizontal=True, index=menu.index(st.session_state.pagina_ativa))
+# O index garante que ele mantenha a página selecionada
+index_salvo = menu.index(st.session_state.pagina_ativa) if st.session_state.pagina_ativa in menu else 0
+escolha = st.radio("Selecione o Painel:", menu, horizontal=True, index=index_salvo)
 st.session_state.pagina_ativa = escolha
 st.divider()
 
-# --- PÁGINA OPERADOR ---
+# --- LOGICA DAS PÁGINAS ---
+
 if st.session_state.pagina_ativa == "📲 Terminal Operador":
     st.subheader("Registrar Nova Parada")
     c1, c2 = st.columns(2)
@@ -97,9 +94,8 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
                 pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
                 st.rerun()
     else:
-        st.markdown(f'<div class="alerta-piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alerta-piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Motivo: {aberto.iloc[0]["Motivo"]}</p><p>Obs: {aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
 
-# --- PÁGINA ASSISTENTE ---
 elif st.session_state.pagina_ativa == "💻 Painel Assistente":
     if not st.session_state.logado:
         senha = st.text_input("Senha", type="password")
@@ -113,8 +109,6 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
         m3.metric("TEMPO MÉDIO", f"{med:.1f} min")
         st.divider()
         if not ativos.empty:
-            # BOTÃO DE SEGURANÇA PARA "ACORDAR" O ÁUDIO
-            st.button("📢 CLIQUE AQUI PARA OUVIR O ALERTA (Se estiver mudo)")
             st.markdown('<div class="alerta-piscante">⚠️ ATENÇÃO: HÁ CHAMADOS PENDENTES!</div>', unsafe_allow_html=True)
             for i, r in ativos.iterrows():
                 with st.expander(f"Chamado: {r['Célula']} - {r['Motivo']}", expanded=True):
@@ -132,17 +126,27 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
                             df_f.to_csv(DB_FILE, index=False); st.rerun()
         else: st.success("✅ Tudo em ordem!")
 
-# --- INDICADORES ---
+# --- AQUI ESTÃO OS FILTROS DOS INDICADORES ---
 elif st.session_state.pagina_ativa == "📊 Indicadores":
     if st.session_state.logado:
         st.subheader("🔍 Filtros de Análise")
-        d_list = sorted(list(set(dados['Data'].unique())), reverse=True)
-        s_d = st.multiselect("Datas:", d_list, default=[hoje] if hoje in d_list else [])
-        df_i = dados[dados['Data'].isin(s_d)] if s_d else dados
-        if not df_i.empty:
-            st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS"), use_container_width=True)
+        if not dados.empty:
+            c_f1, c_f2 = st.columns(2)
+            d_list = sorted(list(set(dados['Data'].unique())), reverse=True)
+            s_d = c_f1.multiselect("Datas:", d_list, default=[hoje] if hoje in d_list else [])
+            s_u = c_f2.multiselect("Células:", sorted(dados['Célula'].unique()))
+            
+            df_i = dados.copy()
+            if s_d: df_i = df_i[df_i['Data'].isin(s_d)]
+            if s_u: df_i = df_i[df_i['Célula'].isin(s_u)]
+            
+            if not df_i.empty:
+                g1, g2 = st.columns(2)
+                with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
+                with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
+            else: st.info("Selecione filtros para ver os gráficos.")
+    else: st.warning("🔒 Faça login no Painel Assistente.")
 
-# --- RELATÓRIOS ---
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
         st.dataframe(dados.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
