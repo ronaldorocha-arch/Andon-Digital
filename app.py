@@ -60,8 +60,19 @@ def carregar_dados():
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
 
+# --- AJUSTE DO SOM (BIP INTERNO) ---
 if tem_parada:
-    st.markdown("<audio autoplay><source src='https://raw.githubusercontent.com/rafaelpernil2/beat-detector/master/resources/sounds/bell.mp3' type='audio/mp3'></audio>", unsafe_allow_html=True)
+    st.markdown("""
+        <script>
+        var context = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = context.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, context.currentTime);
+        osc.connect(context.destination);
+        osc.start();
+        setTimeout(function(){ osc.stop(); }, 500);
+        </script>
+        """, unsafe_allow_html=True)
 
 dados = carregar_dados()
 hoje = get_br_time().strftime("%d/%m/%Y")
@@ -70,7 +81,6 @@ resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] 
 
 # --- 5. MENU DE NAVEGAÇÃO ---
 menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
-# O index garante que ele mantenha a página selecionada
 index_salvo = menu.index(st.session_state.pagina_ativa) if st.session_state.pagina_ativa in menu else 0
 escolha = st.radio("Selecione o Painel:", menu, horizontal=True, index=index_salvo)
 st.session_state.pagina_ativa = escolha
@@ -126,7 +136,6 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
                             df_f.to_csv(DB_FILE, index=False); st.rerun()
         else: st.success("✅ Tudo em ordem!")
 
-# --- AQUI ESTÃO OS FILTROS DOS INDICADORES ---
 elif st.session_state.pagina_ativa == "📊 Indicadores":
     if st.session_state.logado:
         st.subheader("🔍 Filtros de Análise")
