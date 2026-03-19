@@ -51,79 +51,83 @@ dados_completos = carregar_dados()
 # --- ABA 1: OPERADOR ---
 with aba_op:
     st.subheader("Registrar Nova Parada")
-    
     col1, col2 = st.columns(2)
-    with col1:
-        sel_ups = st.selectbox("Sua Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
-    with col2:
-        sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
+    lista_ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
+    with col1: sel_ups = st.selectbox("Sua Célula", lista_ups)
+    with col2: sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
     desc = st.text_area("O que aconteceu?", key="desc_op")
-
-    # Verifica se ESTA Célula específica já tem um chamado aberto
     chamado_esta_celula = dados_completos[(dados_completos['Célula'] == sel_ups) & (dados_completos['Status'] == "🔴 Aberto")]
 
     if not chamado_esta_celula.empty:
-        # Se houver chamado aberto para esta UPS, mostra o aviso gigante
         st.markdown(f"""
             <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; border: 4px solid white;">
                 <h1 style="color: white; margin: 0;">⏳ AGUARDANDO ASSISTENTE...</h1>
                 <p style="color: white; font-size: 20px;">O chamado para {sel_ups} foi enviado às {chamado_esta_celula.iloc[0]['Início']}</p>
-            </div>
-            <br>
+            </div><br>
         """, unsafe_allow_html=True)
     else:
-        # Se não houver chamado, mostra o botão de chamar
         if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
             if desc:
-                salvar_chamado(sel_ups, sel_motivo, desc)
-                st.success("Chamado enviado!")
-                st.rerun()
-            else:
-                st.warning("Descreva o problema.")
-
-    # Lista de todos os pendentes no setor (opcional, para informação geral)
-    ativos_geral = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
-    if not ativos_geral.empty:
-        st.divider()
-        st.subheader("⚠️ Outros chamados ativos no setor")
-        st.table(ativos_geral[['Célula', 'Motivo', 'Início']])
+                salvar_chamado(sel_ups, sel_motivo, desc); st.success("Chamado enviado!"); st.rerun()
+            else: st.warning("Descreva o problema.")
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
     st.subheader("Controle de Atendimentos")
     ativos_as = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
-    
-    if ativos_as.empty:
-        st.info("✅ Nenhuma pendência.")
+    if ativos_as.empty: st.info("✅ Nenhuma pendência.")
     else:
         for i, row in ativos_as.iterrows():
             with st.expander(f"🔴 {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
                 st.write(f"**Descrição:** {row['Descrição']}")
                 if st.button(f"✅ Finalizar ID {row['ID']}", key=f"as_fin_{row['ID']}"):
-                    finalizar_chamado(row['ID'])
-                    st.rerun()
-    
+                    finalizar_chamado(row['ID']); st.rerun()
     st.divider()
     st.subheader("Histórico Recente")
     st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
 
-# --- ABA 3: INDICADORES ---
+# --- ABA 3: INDICADORES COM FILTRO DE UPS ---
 with aba_ind:
-    st.subheader("Dashboard de Performance")
+    st.subheader("Filtros de Análise")
     if dados_completos.empty:
         st.warning("Sem dados.")
     else:
-        hoje = datetime.now().strftime("%Y-%m-%d")
-        datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
-        data_sel = st.multiselect("Filtrar Data:", datas_lista, default=[hoje] if hoje in datas_lista else [])
-        df_grafico = dados_completos[dados_completos['Data'].isin(data_sel)] if data_sel else dados_completos
-
-        if not df_grafico.empty:
-            c1, c2 = st.columns(2)
-            with c1: st.plotly_chart(px.bar(df_grafico, x='Célula', title='Ocorrências por UPS', color_discrete_sequence=['#ff4b4b']), use_container_width=True)
-            with c2: st.plotly_chart(px.pie(df_grafico, names='Motivo', title='Distribuição por Motivo', hole=0.4), use_container_width=True)
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            hoje = datetime.now().strftime("%Y-%m-%d")
+            datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
+            data_sel = st.multiselect("1. Filtrar Datas:", datas_lista, default=[hoje] if hoje in datas_lista else [])
         
+        with c_f2:
+            ups_lista = sorted(dados_completos['Célula'].unique())
+            ups_sel = st.multiselect("2. Filtrar Células (vazio = todas):", ups_lista)
+
+        # Aplicando os filtros
+        df_f = dados_completos.copy()
+        if data_sel: df_f = df_f[df_f['Data'].isin(data_sel)]
+        if ups_sel: df_f = df_f[df_f['Célula'].isin(ups_sel)]
+
+        if df_f.empty:
+            st.info("Nenhum dado encontrado para os filtros selecionados.")
+        else:
+            st.divider()
+            c1, c2 = st.columns(2)
+            with c1:
+                # Se filtrar uma UPS só, o gráfico de barras mostra os motivos
+                if len(ups_sel) == 1:
+                    fig1 = px.bar(df_f, x='Motivo', title=f'Motivos de Parada: {ups_sel[0]}', color_discrete_sequence=['#ff4b4b'])
+                else:
+                    fig1 = px.bar(df_f, x='Célula', title='Ocorrências por UPS', color_discrete_sequence=['#ff4b4b'])
+                st.plotly_chart(fig1, use_container_width=True)
+            
+            with c2:
+                fig2 = px.pie(df_f, names='Motivo', title='Distribuição Geral de Motivos', hole=0.4)
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            st.metric("Total de Chamados no Filtro", len(df_f))
+
+        # Administração
         st.divider()
         with st.expander("🛠️ Administração"):
             confirma_senha = st.text_input("Senha Admin", type="password")
