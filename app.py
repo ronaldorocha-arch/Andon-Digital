@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO ---
 DB_FILE = "registro_paradas.csv"
-
+im
 def checar_ativos_rapido():
     if os.path.exists(DB_FILE):
         try:
@@ -96,7 +96,7 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
             "Falta de Matéria-prima", 
             "Qualidade da Matéria-prima", 
             "Falha de Abastecimento", 
-            "Problema de Processo"
+            "Problema de Processo",
             "Composer", 
             "Manutenção Equipamento",
             "Outros"
