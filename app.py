@@ -96,7 +96,8 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
             "Falta de Matéria-prima", 
             "Qualidade da Matéria-prima", 
             "Falha de Abastecimento", 
-            "Problema de Processo", 
+            "Problema de Processo"
+            "Composer", 
             "Manutenção Equipamento",
             "Outros"
         ]
