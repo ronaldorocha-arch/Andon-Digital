@@ -23,7 +23,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza a cada 5 segundos para resposta rápida
+# Atualiza a cada 5 segundos
 st_autorefresh(interval=5000, key="datarefresh")
 
 # --- 2. CONTROLE DE SESSÃO ---
@@ -60,18 +60,14 @@ def carregar_dados():
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
 
-# --- AJUSTE DO SOM (BIP INTERNO) ---
+# --- AJUSTE DE SOM (VERSÃO COMPATÍVEL) ---
 if tem_parada:
+    # Usando um som de alerta curto e público que costuma pular filtros de firewall
     st.markdown("""
-        <script>
-        var context = new (window.AudioContext || window.webkitAudioContext)();
-        var osc = context.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, context.currentTime);
-        osc.connect(context.destination);
-        osc.start();
-        setTimeout(function(){ osc.stop(); }, 500);
-        </script>
+        <iframe src="https://www.asite.com/audio/alert.mp3" allow="autoplay" style="display:none" id="iframeAudio"></iframe>
+        <audio autoplay>
+            <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mp3">
+        </audio>
         """, unsafe_allow_html=True)
 
 dados = carregar_dados()
