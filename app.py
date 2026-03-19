@@ -16,7 +16,9 @@ if not os.path.exists(DB_FILE):
 
 def carregar_dados():
     try:
-        return pd.read_csv(DB_FILE)
+        # Lendo e garantindo que o ID seja tratado corretamente
+        df = pd.read_csv(DB_FILE)
+        return df
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status"])
 
@@ -44,50 +46,61 @@ st.title("🚨 Sistema Andon - Tecnologia de Processos")
 
 aba_op, aba_as = st.tabs(["📲 Terminal do Operador", "💻 Painel da Assistente"])
 
+# --- LÓGICA DE DADOS COMPARTILHADA ---
+dados = carregar_dados()
+ativos = dados[dados['Status'] == "🔴 Aberto"]
+
 with aba_op:
     st.subheader("Registrar Nova Parada")
     col1, col2 = st.columns(2)
     with col1:
-        sel_ups = st.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
+        sel_ups = st.selectbox("Sua Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
     with col2:
         sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
     desc = st.text_area("O que aconteceu?", placeholder="Descreva o problema aqui...")
     
-    # BOTÃO SIMPLIFICADO PARA NÃO DAR ERRO
     if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
         if desc:
             salvar_chamado(sel_ups, sel_motivo, desc)
-            st.success("Chamado enviado com sucesso!")
+            st.success("Chamado enviado! Aguarde o atendimento.")
             st.rerun()
         else:
-            st.warning("Por favor, descreva o problema.")
+            st.warning("Por favor, descreva o problema antes de chamar.")
+
+    # --- NOVIDADE: Confirmação visual para o Operador ---
+    if not ativos.empty:
+        st.divider()
+        st.subheader("⚠️ Chamados Pendentes no Setor")
+        # Mostra apenas os dados mais importantes para o operador não se confundir
+        st.table(ativos[['Célula', 'Motivo', 'Início']])
 
 with aba_as:
-    st.subheader("Chamados Ativos")
-    dados = carregar_dados()
-    ativos = dados[dados['Status'] == "🔴 Aberto"]
+    st.subheader("Painel de Controle da Assistente")
     
     if ativos.empty:
-        st.info("Nenhuma parada registrada no momento.")
+        st.info("✅ Nenhuma parada registrada. Todas as linhas operando.")
     else:
+        # Exibe os chamados ativos em formato de cartões (expanders)
         for i, row in ativos.iterrows():
-            with st.expander(f"⚠️ {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
+            with st.expander(f"🔴 AGUARDANDO: {row['Célula']} ({row['Início']})", expanded=True):
+                st.write(f"**Motivo:** {row['Motivo']}")
                 st.write(f"**Detalhe:** {row['Descrição']}")
-                if st.button(f"✅ Concluir Chamado {row['ID']}", key=f"btn_{row['ID']}"):
+                if st.button(f"✅ Finalizar Atendimento {row['ID']}", key=f"btn_as_{row['ID']}"):
                     finalizar_chamado(row['ID'])
                     st.rerun()
     
     st.divider()
-    st.subheader("Histórico de Paradas")
+    st.subheader("Histórico Completo")
     st.dataframe(dados, use_container_width=True, hide_index=True)
 
-# CSS para garantir que o botão fique grande sem quebrar o código
+# Estilo visual
 st.markdown("""
     <style>
     div.stButton > button:first-child {
         width: 100%;
-        height: 60px;
+        height: 70px;
+        font-size: 24px !important;
     }
     </style>
     """, unsafe_allow_html=True)
