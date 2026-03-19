@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO ---
 DB_FILE = "registro_paradas.csv"
-im
+
 def checar_ativos_rapido():
     if os.path.exists(DB_FILE):
         try:
@@ -96,18 +96,16 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
             "Falta de Matéria-prima", 
             "Qualidade da Matéria-prima", 
             "Falha de Abastecimento", 
-            "Problema de Processo",
-            "Composer", 
+            "Problema de Processo", 
             "Manutenção Equipamento",
             "Outros"
         ]
         motivo_selecionado = c2.selectbox("Qual o problema?", lista_problemas)
         
-        # Campo de Observação SEMPRE visível e OPCIONAL
-        obs_op = st.text_input("Observação Adicional (Opcional):", placeholder="Ex: falta parafuso M4, máquina parou do nada...")
+        # Campo de Observação limpo e opcional
+        obs_op = st.text_input("Observação Adicional (Opcional):")
         
         if st.button("🔔 ENVIAR CHAMADO", type="primary"):
-            # Lógica: Se houver algo escrito na obs, junta com o motivo. Se não, usa só o motivo.
             if obs_op:
                 final_desc = f"{motivo_selecionado} - {obs_op}"
             else:
@@ -164,8 +162,6 @@ elif st.session_state.pagina_ativa == "📊 Indicadores":
                 g1, g2 = st.columns(2)
                 with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
                 with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
-            else: st.info("Selecione filtros para ver os gráficos.")
-    else: st.warning("🔒 Faça login no Painel Assistente.")
 
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
