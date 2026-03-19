@@ -92,7 +92,6 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
     aberto = ativos[ativos['Célula'] == sel_ups]
     
     if aberto.empty:
-        # MOTIVOS PRÉ-DEFINIDOS
         lista_problemas = [
             "Falta de Matéria-prima", 
             "Qualidade da Matéria-prima", 
@@ -103,13 +102,16 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
         ]
         motivo_selecionado = c2.selectbox("Qual o problema?", lista_problemas)
         
-        # Só mostra campo de texto se selecionar "Outros"
-        desc_adicional = ""
-        if motivo_selecionado == "Outros":
-            desc_adicional = st.text_input("Especifique o problema:")
+        # Campo de Observação SEMPRE visível e OPCIONAL
+        obs_op = st.text_input("Observação Adicional (Opcional):", placeholder="Ex: falta parafuso M4, máquina parou do nada...")
         
         if st.button("🔔 ENVIAR CHAMADO", type="primary"):
-            final_desc = desc_adicional if motivo_selecionado == "Outros" else motivo_selecionado
+            # Lógica: Se houver algo escrito na obs, junta com o motivo. Se não, usa só o motivo.
+            if obs_op:
+                final_desc = f"{motivo_selecionado} - {obs_op}"
+            else:
+                final_desc = motivo_selecionado
+
             nid = dados['ID'].max() + 1 if not dados.empty else 1
             novo = pd.DataFrame([{"ID": int(nid), "Célula": sel_ups, "Motivo": motivo_selecionado, "Descrição": final_desc, "Início": get_br_time().strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto", "Data": hoje, "Ação": "-", "Minutos": 0.0}])
             pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
@@ -132,8 +134,7 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
         if not ativos.empty:
             st.markdown('<div class="alerta-piscante">⚠️ ATENÇÃO: HÁ CHAMADOS PENDENTES!</div>', unsafe_allow_html=True)
             for i, r in ativos.iterrows():
-                with st.expander(f"Célula: {r['Célula']} - Problema: {r['Descrição']}", expanded=True):
-                    # Ação é opcional
+                with st.expander(f"Célula: {r['Célula']} - Detalhe: {r['Descrição']}", expanded=True):
                     ac = st.text_input("Ação Tomada (Opcional):", key=f"ac_{r['ID']}")
                     if st.button(f"Concluir Atendimento #{r['ID']}", key=f"f_{r['ID']}"):
                         df_f = pd.read_csv(DB_FILE)
@@ -142,7 +143,6 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
                         h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
                         df_f.at[idx[0], 'Fim'] = ag.strftime("%H:%M:%S")
                         df_f.at[idx[0], 'Status'] = "🟢 Finalizado"
-                        # Se não escreveu nada, salva como "Concluído"
                         df_f.at[idx[0], 'Ação'] = ac if ac else "Atendimento Concluído"
                         df_f.at[idx[0], 'Minutos'] = round((ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60, 1)
                         df_f.to_csv(DB_FILE, index=False); st.rerun()
@@ -163,6 +163,8 @@ elif st.session_state.pagina_ativa == "📊 Indicadores":
                 g1, g2 = st.columns(2)
                 with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
                 with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
+            else: st.info("Selecione filtros para ver os gráficos.")
+    else: st.warning("🔒 Faça login no Painel Assistente.")
 
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
