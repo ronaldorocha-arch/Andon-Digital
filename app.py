@@ -42,11 +42,37 @@ def finalizar_chamado(id_chamado):
         df.at[idx[0], 'Status'] = "🟢 Finalizado"
         df.to_csv(DB_FILE, index=False)
 
+# --- CSS PARA ANIMAÇÃO PISCANTE ---
+st.markdown("""
+    <style>
+    @keyframes piscar {
+        0% { background-color: #ff4b4b; opacity: 1; }
+        50% { background-color: #ff8e8e; opacity: 0.8; }
+        100% { background-color: #ff4b4b; opacity: 1; }
+    }
+    .piscante {
+        animation: piscar 1s infinite;
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    div.stButton > button:first-child {
+        width: 100%;
+        height: 60px;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --- INTERFACE ---
 st.title("🚨 Sistema Andon - Tecnologia de Processos")
 aba_op, aba_as, aba_ind = st.tabs(["📲 Terminal do Operador", "💻 Painel da Assistente", "📊 Indicadores"])
 
 dados_completos = carregar_dados()
+ativos_as = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
 
 # --- ABA 1: OPERADOR ---
 with aba_op:
@@ -57,77 +83,59 @@ with aba_op:
     with col2: sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
     desc = st.text_area("O que aconteceu?", key="desc_op")
-    chamado_esta_celula = dados_completos[(dados_completos['Célula'] == sel_ups) & (dados_completos['Status'] == "🔴 Aberto")]
+    chamado_esta_celula = ativos_as[ativos_as['Célula'] == sel_ups]
 
     if not chamado_esta_celula.empty:
-        st.markdown(f"""
-            <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; border: 4px solid white;">
-                <h1 style="color: white; margin: 0;">⏳ AGUARDANDO ASSISTENTE...</h1>
-                <p style="color: white; font-size: 20px;">O chamado para {sel_ups} foi enviado às {chamado_esta_celula.iloc[0]['Início']}</p>
-            </div><br>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Chamado enviado às {chamado_esta_celula.iloc[0]["Início"]}</p></div>', unsafe_allow_html=True)
     else:
         if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
             if desc:
-                salvar_chamado(sel_ups, sel_motivo, desc); st.success("Chamado enviado!"); st.rerun()
+                salvar_chamado(sel_ups, sel_motivo, desc); st.rerun()
             else: st.warning("Descreva o problema.")
 
-# --- ABA 2: ASSISTENTE ---
+# --- ABA 2: ASSISTENTE (COM EFEITO PISCANTE) ---
 with aba_as:
-    st.subheader("Controle de Atendimentos")
-    ativos_as = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
-    if ativos_as.empty: st.info("✅ Nenhuma pendência.")
-    else:
+    if not ativos_as.empty:
+        # Título piscante se houver chamados
+        st.markdown('<div class="piscante"><h2>⚠️ ATENÇÃO: HÁ CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
+        
         for i, row in ativos_as.iterrows():
             with st.expander(f"🔴 {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
                 st.write(f"**Descrição:** {row['Descrição']}")
-                if st.button(f"✅ Finalizar ID {row['ID']}", key=f"as_fin_{row['ID']}"):
+                if st.button(f"✅ Finalizar Atendimento {row['ID']}", key=f"as_fin_{row['ID']}"):
                     finalizar_chamado(row['ID']); st.rerun()
+    else:
+        st.info("✅ Nenhuma pendência no momento.")
+    
     st.divider()
     st.subheader("Histórico Recente")
     st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
 
-# --- ABA 3: INDICADORES COM FILTRO DE UPS ---
+# --- ABA 3: INDICADORES ---
 with aba_ind:
-    st.subheader("Filtros de Análise")
-    if dados_completos.empty:
-        st.warning("Sem dados.")
-    else:
+    st.subheader("Análise de Dados")
+    if not dados_completos.empty:
         c_f1, c_f2 = st.columns(2)
         with c_f1:
-            hoje = datetime.now().strftime("%Y-%m-%d")
             datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
-            data_sel = st.multiselect("1. Filtrar Datas:", datas_lista, default=[hoje] if hoje in datas_lista else [])
-        
+            data_sel = st.multiselect("Datas:", datas_lista, default=[datetime.now().strftime("%Y-%m-%d")] if datetime.now().strftime("%Y-%m-%d") in datas_lista else [])
         with c_f2:
             ups_lista = sorted(dados_completos['Célula'].unique())
-            ups_sel = st.multiselect("2. Filtrar Células (vazio = todas):", ups_lista)
+            ups_sel = st.multiselect("Células:", ups_lista)
 
-        # Aplicando os filtros
         df_f = dados_completos.copy()
         if data_sel: df_f = df_f[df_f['Data'].isin(data_sel)]
         if ups_sel: df_f = df_f[df_f['Célula'].isin(ups_sel)]
 
-        if df_f.empty:
-            st.info("Nenhum dado encontrado para os filtros selecionados.")
-        else:
-            st.divider()
+        if not df_f.empty:
             c1, c2 = st.columns(2)
             with c1:
-                # Se filtrar uma UPS só, o gráfico de barras mostra os motivos
-                if len(ups_sel) == 1:
-                    fig1 = px.bar(df_f, x='Motivo', title=f'Motivos de Parada: {ups_sel[0]}', color_discrete_sequence=['#ff4b4b'])
-                else:
-                    fig1 = px.bar(df_f, x='Célula', title='Ocorrências por UPS', color_discrete_sequence=['#ff4b4b'])
-                st.plotly_chart(fig1, use_container_width=True)
-            
+                title = f'Motivos: {ups_sel[0]}' if len(ups_sel) == 1 else 'Chamados por UPS'
+                x_val = 'Motivo' if len(ups_sel) == 1 else 'Célula'
+                st.plotly_chart(px.bar(df_f, x=x_val, title=title, color_discrete_sequence=['#ff4b4b']), use_container_width=True)
             with c2:
-                fig2 = px.pie(df_f, names='Motivo', title='Distribuição Geral de Motivos', hole=0.4)
-                st.plotly_chart(fig2, use_container_width=True)
-            
-            st.metric("Total de Chamados no Filtro", len(df_f))
+                st.plotly_chart(px.pie(df_f, names='Motivo', title='Distribuição de Motivos', hole=0.4), use_container_width=True)
 
-        # Administração
         st.divider()
         with st.expander("🛠️ Administração"):
             confirma_senha = st.text_input("Senha Admin", type="password")
@@ -135,5 +143,3 @@ with aba_ind:
                 if confirma_senha == SENHA_ADMIN:
                     pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data"]).to_csv(DB_FILE, index=False)
                     st.rerun()
-
-st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-weight: bold; }</style>""", unsafe_allow_html=True)
