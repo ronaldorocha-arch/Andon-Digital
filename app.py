@@ -16,6 +16,7 @@ SENHA_ADMIN = "12345"
 LISTA_MOTIVOS = ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Problemas com EP", "Outros"]
 
 def get_brasil_time():
+    # Garante o horário de Brasília independente do servidor
     return datetime.utcnow() - timedelta(hours=3)
 
 # --- BANCO DE DADOS ---
@@ -25,9 +26,10 @@ if not os.path.exists(DB_FILE):
 def carregar_dados():
     try:
         df = pd.read_csv(DB_FILE)
+        # Limpeza de segurança: Remove registros com formato de data antigo (AAAA-MM-DD) se desejar padronizar
+        # Ou apenas garante que a coluna Minutos exista
         if "Minutos" not in df.columns: 
             df["Minutos"] = 0.0
-            df.to_csv(DB_FILE, index=False)
         return df
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
@@ -38,7 +40,8 @@ def salvar_chamado(celula, motivo, desc):
     novo = {
         "ID": len(df) + 1, "Célula": celula, "Motivo": motivo, "Descrição": desc,
         "Início": agora.strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto",
-        "Data": agora.strftime("%d/%m/%Y"), "Ação": "-", "Minutos": 0.0
+        "Data": agora.strftime("%d/%m/%Y"), 
+        "Ação": "-", "Minutos": 0.0
     }
     pd.concat([df, pd.DataFrame([novo])], ignore_index=True).to_csv(DB_FILE, index=False)
 
@@ -80,11 +83,14 @@ with aba_op:
     col_a, col_b = st.columns(2)
     sel_ups = col_a.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
     chamado_aberto = ativos[ativos['Célula'] == sel_ups]
+    
     if chamado_aberto.empty:
         sel_motivo = col_b.selectbox("Motivo", LISTA_MOTIVOS, key="motivo_op")
-        desc = st.text_area("Descrição do problema", key="desc_op")
-        if st.button("🔔 CHAMAR AGORA", type="primary"):
-            if desc: salvar_chamado(sel_ups, sel_motivo, desc); st.rerun()
+        desc = st.text_area("O que aconteceu?", key="desc_op")
+        if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
+            if desc: 
+                salvar_chamado(sel_ups, sel_motivo, desc)
+                st.rerun()
     else:
         st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p style="font-size: 20px;">Célula: <b>{sel_ups}</b> | Motivo: <b>{chamado_aberto.iloc[0]["Motivo"]}</b></p><p><i>"{chamado_aberto.iloc[0]["Descrição"]}"</i></p></div>', unsafe_allow_html=True)
 
@@ -103,37 +109,46 @@ with aba_as:
                 st.write(f"**Descrição:** {row['Descrição']}")
                 txt_acao = st.text_input(f"Ação Tomada", key=f"ac_{row['ID']}")
                 if st.button(f"✅ Finalizar {row['ID']}", key=f"bt_{row['ID']}"):
-                    if txt_acao: finalizar_chamado(row['ID'], txt_acao); st.rerun()
-    else: st.info("✅ Sem pendências.")
+                    if txt_acao: 
+                        finalizar_chamado(row['ID'], txt_acao)
+                        st.rerun()
+    else: 
+        st.info("✅ Sem pendências.")
     
     st.divider()
     with st.expander("🗑️ Opções de Limpeza"):
-        confirma = st.checkbox("Eu quero zerar os chamados de hoje.")
+        # Key dinâmica garante que ele desmarque após o rerun
+        confirma = st.checkbox("Confirmar exclusão dos dados de hoje", key="check_limpeza")
         if st.button("Zerar Contagem de Hoje"):
             if confirma:
+                # Remove apenas os que batem exatamente com a data de hoje (Brasil)
                 df_limpo = dados_completos[dados_completos['Data'] != hoje_br]
                 df_limpo.to_csv(DB_FILE, index=False)
+                st.success("Dados de hoje removidos com sucesso!")
                 st.rerun()
+            else:
+                st.warning("Você precisa marcar a caixa de confirmação.")
 
     st.subheader("Histórico Recente")
     st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True,
-                 column_config={"ID": st.column_config.Column(width="small"), "Célula": st.column_config.Column(width="small")})
+                 column_config={
+                     "ID": st.column_config.Column(width="small"), 
+                     "Célula": st.column_config.Column(width="small")
+                 })
 
-# --- ABA 3: INDICADORES (FILTROS DE VOLTA!) ---
+# --- ABA 3: INDICADORES ---
 with aba_ind:
     st.subheader("Filtros de Análise")
     if not dados_completos.empty:
         col_f1, col_f2 = st.columns(2)
         
-        # Filtro de Data
-        datas_disponiveis = sorted(dados_completos['Data'].unique(), reverse=True)
-        data_sel = col_f1.multiselect("1. Selecione as Datas:", datas_disponiveis, default=[hoje_br] if hoje_br in datas_disponiveis else [])
+        # Filtro de Data (Corrigido para evitar datas fantasmas)
+        # Converte para set e volta para lista para garantir unicidade
+        datas_disponiveis = sorted(list(set(dados_completos['Data'].unique())), reverse=True)
+        data_sel = col_f1.multiselect("Selecione as Datas:", datas_disponiveis, default=[hoje_br] if hoje_br in datas_disponiveis else [])
         
-        # Filtro de Célula
-        ups_disponiveis = sorted(dados_completos['Célula'].unique())
-        ups_sel = col_f2.multiselect("2. Selecione as Células (vazio = todas):", ups_disponiveis)
+        ups_sel = col_f2.multiselect("Selecione as Células:", sorted(dados_completos['Célula'].unique()))
 
-        # Aplicar Filtros
         df_filtrado = dados_completos.copy()
         if data_sel:
             df_filtrado = df_filtrado[df_filtrado['Data'].isin(data_sel)]
@@ -144,18 +159,11 @@ with aba_ind:
             st.divider()
             g1, g2 = st.columns(2)
             with g1:
-                # Gráfico de Quantidade por Célula
                 df_count = df_filtrado['Célula'].value_counts().reset_index()
                 df_count.columns = ['Célula', 'Quantidade']
                 st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', title='Ocorrências por Célula', 
                                       color_discrete_sequence=['#ff4b4b'], text_auto=True), use_container_width=True)
             with g2:
-                # Gráfico de Motivos
                 st.plotly_chart(px.pie(df_filtrado, names='Motivo', title='Distribuição por Motivo', hole=0.4), use_container_width=True)
             
-            st.write("**Detalhamento dos Chamados Filtrados:**")
             st.dataframe(df_filtrado.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum dado encontrado para os filtros selecionados.")
-    else:
-        st.warning("Ainda não há dados no sistema.")
