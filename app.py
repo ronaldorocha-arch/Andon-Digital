@@ -12,7 +12,7 @@ st_autorefresh(interval=30000, key="datarefresh")
 DB_FILE = "registro_paradas.csv"
 SENHA_ACESSO = "12345"
 
-# --- MEMÓRIA DE LOGIN (A MÁGICA ESTÁ AQUI) ---
+# --- MEMÓRIA DE LOGIN ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
@@ -48,7 +48,7 @@ resolvidos_hoje = dados_completos[(dados_completos['Status'] == "🟢 Finalizado
 st.title("🚨 Andon Digital - NHS")
 aba_op, aba_as, aba_ind = st.tabs(["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores"])
 
-# --- ABA 1: OPERADOR (Livre, sem senha) ---
+# --- ABA 1: OPERADOR ---
 with aba_op:
     st.subheader("Registrar Nova Parada")
     col1, col2 = st.columns(2)
@@ -65,26 +65,15 @@ with aba_op:
     else:
         st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Motivo: {chamado_aberto.iloc[0]["Motivo"]}</p></div>', unsafe_allow_html=True)
 
-# --- ABA 2: ASSISTENTE (COM MEMÓRIA DE SENHA) ---
+# --- ABA 2: ASSISTENTE ---
 with aba_as:
     if not st.session_state.logado:
-        # Pede a senha apenas se não estiver logado
-        with st.form("login_assistente"):
-            senha_digitada = st.text_input("Senha do Painel", type="password")
-            entrar = st.form_submit_button("Acessar Painel")
-            if entrar:
-                if senha_digitada == SENHA_ACESSO:
-                    st.session_state.logado = True
-                    st.rerun()
-                else:
-                    st.error("Senha incorreta!")
+        senha_input = st.text_input("Senha do Painel", type="password")
+        if st.button("Acessar Painel"):
+            if senha_input == SENHA_ACESSO:
+                st.session_state.logado = True
+                st.rerun()
     else:
-        # SE JÁ ESTIVER LOGADO, MOSTRA TUDO DIRETO
-        col_sair = st.columns([8, 2])
-        if col_sair[1].button("🔴 SAIR / BLOQUEAR"):
-            st.session_state.logado = False
-            st.rerun()
-
         m1, m2, m3 = st.columns(3)
         m1.metric("🔴 PARADAS AGORA", len(ativos))
         m2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
@@ -109,7 +98,6 @@ with aba_as:
                             df_f.to_csv(DB_FILE, index=False)
                             st.rerun()
         
-        st.divider()
         with st.expander("🗑️ Opções de Limpeza"):
             if st.checkbox("Confirmar exclusão de hoje?"):
                 if st.button("ZERAR TUDO DE HOJE"):
@@ -119,11 +107,10 @@ with aba_as:
 
         st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
 
-# --- ABA 3: INDICADORES ---
+# --- ABA 3: INDICADORES COM DOWNLOAD ---
 with aba_ind:
     if st.session_state.logado:
         if not dados_completos.empty:
-            # Filtros de Indicadores
             col_f1, col_f2 = st.columns(2)
             datas_lista = sorted(list(set(dados_completos['Data'].unique())), reverse=True)
             sel_d = col_f1.multiselect("Filtrar Datas:", datas_lista, default=[hoje_br] if hoje_br in datas_lista else [])
@@ -141,7 +128,17 @@ with aba_ind:
                     st.plotly_chart(px.bar(cont, x='Célula', y='Qtd', title="Quantidade por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
                 with g2:
                     st.plotly_chart(px.pie(df_ind, names='Motivo', title="Motivos", hole=0.4), use_container_width=True)
+                
+                # --- BOTÃO DE DOWNLOAD ---
+                st.divider()
+                csv = df_ind.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 BAIXAR RELATÓRIO (EXCEL)",
+                    data=csv,
+                    file_name=f'Relatorio_Andon_NHS_{get_brasil_time().strftime("%d_%m_%Y")}.csv',
+                    mime='text/csv',
+                )
         else:
             st.info("Sem dados.")
     else:
-        st.warning("🔒 Faça login na aba 'Painel Assistente' para liberar os indicadores.")
+        st.warning("🔒 Faça login para liberar o relatório.")
