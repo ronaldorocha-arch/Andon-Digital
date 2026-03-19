@@ -15,19 +15,19 @@ DB_FILE = "registro_paradas.csv"
 SENHA_ADMIN = "12345"
 LISTA_MOTIVOS = ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Problemas com EP", "Outros"]
 
-# --- FUNÇÃO PARA PEGAR HORA DE BRASILIA (UTC-3) ---
 def get_brasil_time():
-    # O Streamlit Cloud costuma usar UTC. Subtraímos 3 horas para Brasília.
     return datetime.utcnow() - timedelta(hours=3)
 
-# --- FUNÇÕES DE BANCO DE DADOS ---
+# --- BANCO DE DADOS ---
 if not os.path.exists(DB_FILE):
     pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"]).to_csv(DB_FILE, index=False)
 
 def carregar_dados():
     try:
         df = pd.read_csv(DB_FILE)
-        if "Minutos" not in df.columns: df["Minutos"] = 0.0
+        if "Minutos" not in df.columns: 
+            df["Minutos"] = 0.0
+            df.to_csv(DB_FILE, index=False)
         return df
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
@@ -38,8 +38,7 @@ def salvar_chamado(celula, motivo, desc):
     novo = {
         "ID": len(df) + 1, "Célula": celula, "Motivo": motivo, "Descrição": desc,
         "Início": agora.strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto",
-        "Data": agora.strftime("%d/%m/%Y"), # Formato Brasil
-        "Ação": "-", "Minutos": 0.0
+        "Data": agora.strftime("%d/%m/%Y"), "Ação": "-", "Minutos": 0.0
     }
     pd.concat([df, pd.DataFrame([novo])], ignore_index=True).to_csv(DB_FILE, index=False)
 
@@ -67,10 +66,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- LOGICA DE RESET DE FORMULÁRIO ---
-if 'form_desc' not in st.session_state: st.session_state.form_desc = ""
-
-# --- DADOS ---
 dados_completos = carregar_dados()
 hoje_br = get_brasil_time().strftime("%d/%m/%Y")
 ativos = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
@@ -85,8 +80,10 @@ with aba_op:
     col_a, col_b = st.columns(2)
     sel_ups = col_a.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
     
-    # Se não houver chamado aberto para esta UPS, mostra o formulário limpo
-    if ativos[ativos['Célula'] == sel_ups].empty:
+    # Verifica se há chamado aberto para a célula selecionada
+    chamado_aberto = ativos[ativos['Célula'] == sel_ups]
+    
+    if chamado_aberto.empty:
         sel_motivo = col_b.selectbox("Motivo", LISTA_MOTIVOS, key="motivo_op")
         desc = st.text_area("Descrição do problema", key="desc_op")
         if st.button("🔔 CHAMAR AGORA", type="primary"):
@@ -94,7 +91,14 @@ with aba_op:
                 salvar_chamado(sel_ups, sel_motivo, desc)
                 st.rerun()
     else:
-        st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula {sel_ups} em atendimento.</p></div>', unsafe_allow_html=True)
+        # Mostra o motivo pelo qual está aguardando
+        motivo_atual = chamado_aberto.iloc[0]['Motivo']
+        st.markdown(f"""
+            <div class="piscante">
+                <h1>⏳ AGUARDANDO ASSISTENTE...</h1>
+                <p style='font-size: 20px;'>Célula {sel_ups} parada por: <b>{motivo_atual}</b></p>
+            </div>
+        """, unsafe_allow_html=True)
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
@@ -110,41 +114,37 @@ with aba_as:
             if confirma:
                 df_limpo = dados_completos[dados_completos['Data'] != hoje_br]
                 df_limpo.to_csv(DB_FILE, index=False)
-                st.success("Dados de hoje limpos!")
                 st.rerun()
-            else:
-                st.error("Marque a confirmação acima para apagar.")
 
     st.divider()
     
     if not ativos.empty:
         for i, row in ativos.iterrows():
-            with st.expander(f"🚨 {row['Célula']} ({row['Início']})", expanded=True):
-                st.write(f"**Operador:** {row['Descrição']}")
-                txt_acao = st.text_input(f"Ação Tomada", key=f"ac_{row['ID']}")
-                if st.button(f"✅ Finalizar ID {row['ID']}", key=f"bt_{row['ID']}"):
-                    if txt_acao: finalizar_chamado(row['ID'], txt_acao); st.rerun()
-    else: st.info("✅ Nenhuma pendência.")
+            with st.expander(f"🚨 {row['Célula']} - {row['Motivo']}", expanded=True):
+                st.write(f"**Problema:** {row['Descrição']}")
+                txt_acao = st.text_input(f"O que foi feito? (ID {row['ID']})", key=f"ac_{row['ID']}")
+                if st.button(f"✅ Finalizar {row['ID']}", key=f"bt_{row['ID']}"):
+                    if txt_acao: 
+                        finalizar_chamado(row['ID'], txt_acao)
+                        st.rerun()
+    else: st.info("✅ Sem pendências.")
     
     st.divider()
-    # Tabela com ID menor
-    st.dataframe(dados_completos.sort_values(by="ID", ascending=False), 
-                 use_container_width=True, hide_index=True,
-                 column_config={"ID": st.column_config.Column(width="small")})
+    # AJUSTE DE LARGURA DE COLUNA (ID e Célula pequenos)
+    st.dataframe(
+        dados_completos.sort_values(by="ID", ascending=False), 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.Column(width="small"),
+            "Célula": st.column_config.Column(width="small"),
+            "Status": st.column_config.Column(width="medium")
+        }
+    )
 
 # --- ABA 3: INDICADORES ---
 with aba_ind:
     if not dados_completos.empty:
-        datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
-        data_sel = st.multiselect("Datas:", datas_lista, default=[hoje_br] if hoje_br in datas_lista else [])
-        
-        df_f = dados_completos[dados_completos['Data'].isin(data_sel)] if data_sel else dados_completos
-
-        if not df_f.empty:
-            g1, g2 = st.columns(2)
-            with g1:
-                df_count = df_f['Célula'].value_counts().reset_index()
-                df_count.columns = ['Célula', 'Quantidade']
-                st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', title='Ocorrências por Célula', color_discrete_sequence=['#ff4b4b']), use_container_width=True)
-            with g2:
-                st.plotly_chart(px.pie(df_f, names='Motivo', title='Distribuição por Motivo', hole=0.4), use_container_width=True)
+        df_count = dados_completos[dados_completos['Data'] == hoje_br]['Célula'].value_counts().reset_index()
+        df_count.columns = ['Célula', 'Quantidade']
+        st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', title='Ocorrências de Hoje', color_discrete_sequence=['#ff4b4b']), use_container_width=True)
