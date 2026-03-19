@@ -4,13 +4,15 @@ from datetime import datetime
 import os
 import plotly.express as px
 
+# Configuração da Página
 st.set_page_config(page_title="Andon Digital - NHS", page_icon="🚨", layout="wide")
 
 DB_FILE = "registro_paradas.csv"
 
-# Senha para limpar dados (Altere aqui se desejar)
-SENHA_ADMIN = "1234"
+# NOVA SENHA DEFINIDA: 12345
+SENHA_ADMIN = "12345"
 
+# Inicializar o arquivo com a coluna Data se não existir
 if not os.path.exists(DB_FILE):
     df_init = pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data"])
     df_init.to_csv(DB_FILE, index=False)
@@ -18,8 +20,8 @@ if not os.path.exists(DB_FILE):
 def carregar_dados():
     try:
         df = pd.read_csv(DB_FILE)
-        # Garante que a coluna Data existe para os filtros funcionarem
-        if "Data" not in df.columns:
+        # Garante que registros antigos sem data recebam a data de hoje para não quebrar o filtro
+        if not df.empty and "Data" not in df.columns:
             df["Data"] = datetime.now().strftime("%Y-%m-%d")
         return df
     except:
@@ -61,72 +63,93 @@ with aba_op:
     with col2:
         sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
-    desc = st.text_area("O que aconteceu?", key="desc_op")
+    desc = st.text_area("O que aconteceu?", key="desc_op", placeholder="Descreva o problema detalhadamente...")
     if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
         if desc:
             salvar_chamado(sel_ups, sel_motivo, desc)
-            st.success("Chamado enviado!")
+            st.success("Chamado enviado com sucesso!")
             st.rerun()
+        else:
+            st.warning("Por favor, descreva o problema.")
 
-    ativos = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
-    if not ativos.empty:
+    # Visualização de chamados em aberto para o operador saber que foi registrado
+    ativos_op = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
+    if not ativos_op.empty:
         st.divider()
-        st.subheader("⚠️ Chamados Pendentes")
-        st.table(ativos[['Célula', 'Motivo', 'Início']])
+        st.subheader("⚠️ Chamados em Espera")
+        st.table(ativos_op[['Célula', 'Motivo', 'Início']])
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
-    st.subheader("Atendimentos em Aberto")
+    st.subheader("Controle de Atendimentos")
     ativos_as = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
+    
     if ativos_as.empty:
-        st.info("✅ Tudo em ordem.")
+        st.info("✅ Nenhuma pendência. Linhas operando normalmente.")
     else:
         for i, row in ativos_as.iterrows():
-            with st.expander(f"🔴 {row['Célula']} - {row['Motivo']}", expanded=True):
-                st.write(f"**Detalhe:** {row['Descrição']}")
-                if st.button(f"✅ Finalizar ID {row['ID']}", key=f"as_{row['ID']}"):
+            with st.expander(f"🔴 {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
+                st.write(f"**Descrição:** {row['Descrição']}")
+                if st.button(f"✅ Finalizar ID {row['ID']}", key=f"as_fin_{row['ID']}"):
                     finalizar_chamado(row['ID'])
                     st.rerun()
+    
     st.divider()
-    st.subheader("Histórico Geral")
-    st.dataframe(dados_completos, use_container_width=True, hide_index=True)
+    st.subheader("Histórico Recente")
+    st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
 
-# --- ABA 3: INDICADORES COM FILTRO ---
+# --- ABA 3: INDICADORES ---
 with aba_ind:
-    st.subheader("Análise de Performance")
+    st.subheader("Dashboard de Performance")
     
     if dados_completos.empty:
-        st.warning("Sem dados.")
+        st.warning("Aguardando os primeiros registros para gerar indicadores.")
     else:
-        # Filtro de Data
-        datas_disponiveis = sorted(dados_completos['Data'].unique(), reverse=True)
-        data_sel = st.multiselect("Filtrar por Data (Deixe vazio para ver TUDO)", datas_disponiveis, default=[datetime.now().strftime("%Y-%m-%d")])
+        # Filtro de Data (Inicia focado no dia de hoje)
+        hoje = datetime.now().strftime("%Y-%m-%d")
+        datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
         
-        df_filtrado = dados_completos[dados_completos['Data'].isin(data_sel)] if data_sel else dados_completos
+        # Se hoje não tiver dados, ele não trava o filtro
+        default_filtro = [hoje] if hoje in datas_lista else []
+        
+        data_sel = st.multiselect("Selecione a(s) data(s) para análise:", datas_lista, default=default_filtro)
+        
+        df_grafico = dados_completos[dados_completos['Data'].isin(data_sel)] if data_sel else dados_completos
 
-        if df_filtrado.empty:
-            st.info("Nenhum chamado nesta data.")
+        if df_grafico.empty:
+            st.info("Nenhuma ocorrência registrada nas datas selecionadas.")
         else:
             c1, c2 = st.columns(2)
             with c1:
-                fig_ups = px.bar(df_filtrado, x='Célula', title='Chamados por Célula', color_discrete_sequence=['#ff4b4b'])
-                st.plotly_chart(fig_ups, use_container_width=True)
+                fig1 = px.bar(df_grafico, x='Célula', title='Ocorrências por UPS', color_discrete_sequence=['#ff4b4b'])
+                st.plotly_chart(fig1, use_container_width=True)
             with c2:
-                fig_mot = px.pie(df_filtrado, names='Motivo', title='Motivos de Parada', hole=0.4)
-                st.plotly_chart(fig_mot, use_container_width=True)
+                fig2 = px.pie(df_grafico, names='Motivo', title='Distribuição por Motivo', hole=0.4)
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            st.metric("Total de Paradas no período selecionado", len(df_grafico))
 
-        # --- FUNÇÃO PARA LIMPAR TUDO ---
+        # --- ÁREA DE ADMINISTRAÇÃO ---
         st.divider()
-        with st.expander("⚙️ Configurações Avançadas"):
-            st.warning("Atenção: Limpar o histórico apagará todos os registros permanentemente.")
-            senha = st.text_input("Digite a senha para resetar o banco de dados", type="password")
-            if st.button("🗑️ APAGAR TODO O HISTÓRICO"):
-                if senha == SENHA_ADMIN:
+        with st.expander("🛠️ Administração do Sistema"):
+            st.write("Para apagar o banco de dados e zerar o sistema, digite a senha:")
+            confirma_senha = st.text_input("Senha de Administrador", type="password")
+            if st.button("⚠️ APAGAR TUDO PERMANENTEMENTE"):
+                if confirma_senha == SENHA_ADMIN:
                     df_reset = pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data"])
                     df_reset.to_csv(DB_FILE, index=False)
-                    st.success("Histórico apagado com sucesso!")
+                    st.success("Histórico reiniciado!")
                     st.rerun()
                 else:
-                    st.error("Senha incorreta!")
+                    st.error("Senha incorreta. Ação negada.")
 
-st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-size: 20px; }</style>""", unsafe_allow_html=True)
+# CSS para botões de ação rápida
+st.markdown("""
+    <style>
+    div.stButton > button:first-child {
+        width: 100%;
+        height: 60px;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
