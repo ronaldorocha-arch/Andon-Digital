@@ -52,14 +52,16 @@ with aba_op:
     with col2:
         sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
-    desc = st.text_area("O que aconteceu?", placeholder="Ex: Falta de dissipador...")
-    if st.button("🔔 CHAMAR ASSISTENTE", type="primary", width=None): # Corrigido aqui
+    desc = st.text_area("O que aconteceu?", placeholder="Descreva o problema aqui...")
+    
+    # BOTÃO SIMPLIFICADO PARA NÃO DAR ERRO
+    if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
         if desc:
             salvar_chamado(sel_ups, sel_motivo, desc)
             st.success("Chamado enviado com sucesso!")
             st.rerun()
         else:
-            st.warning("Descreva o problema.")
+            st.warning("Por favor, descreva o problema.")
 
 with aba_as:
     st.subheader("Chamados Ativos")
@@ -78,8 +80,14 @@ with aba_as:
     
     st.divider()
     st.subheader("Histórico de Paradas")
-    # Corrigido width aqui também
-    st.dataframe(dados, hide_index=True) 
+    st.dataframe(dados, use_container_width=True, hide_index=True)
 
-# Estilo para botões grandes
-st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-weight: bold; font-size: 20px; }</style>""", unsafe_allow_html=True)
+# CSS para garantir que o botão fique grande sem quebrar o código
+st.markdown("""
+    <style>
+    div.stButton > button:first-child {
+        width: 100%;
+        height: 60px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
