@@ -23,13 +23,14 @@ st.set_page_config(
     layout="wide"
 )
 
-st_autorefresh(interval=30000, key="datarefresh")
+# AJUSTE DE VELOCIDADE: Atualiza a cada 5 segundos para ser mais rápido
+st_autorefresh(interval=5000, key="datarefresh")
 
-# --- 2. CONTROLE DE NAVEGAÇÃO (ESTRUTURA RÍGIDA) ---
+# --- 2. CONTROLE DE NAVEGAÇÃO E SESSÃO ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# Se a aba não estiver definida, começa no Operador
+# Garante que o sistema lembre em qual painel você está
 if 'pagina_ativa' not in st.session_state:
     st.session_state.pagina_ativa = "📲 Terminal Operador"
 
@@ -42,16 +43,19 @@ def get_br_time():
 st.markdown("""
     <style>
     @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
-    .piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white; text-align: center; margin-bottom: 20px; }
+    .piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white; text-align: center; margin-bottom: 20px; font-weight: 400 !important; }
     
-    /* REMOVE NEGRITO */
+    /* TIRA O NEGRITO DE TUDO E DEIXA NÚMEROS PRETOS */
+    html, body, [class*="css"], .stMarkdown, p, span { font-weight: 400 !important; font-family: sans-serif; }
+    
     [data-testid="stMetricValue"] { color: #000000 !important; font-size: 38px; font-weight: 400 !important; }
-    [data-testid="stMetricLabel"] p { font-weight: 400 !important; }
+    [data-testid="stMetricLabel"] p { font-weight: 400 !important; color: #333; }
     
-    div.stButton > button:first-child { width: 100%; height: 50px; font-weight: 400; }
+    /* Botões sem negrito */
+    div.stButton > button:first-child { width: 100%; height: 50px; font-weight: 400 !important; }
     
-    /* Estilo do Menu Superior */
-    .stSelectbox label { display: none; }
+    /* Ajuste do rádio (menu) */
+    div[data-testid="stMetricValue"] > div { font-weight: 400 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -75,13 +79,15 @@ hoje = get_br_time().strftime("%d/%m/%Y")
 ativos = dados[dados['Status'] == "🔴 Aberto"]
 resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
 
-# --- 5. MENU DE NAVEGAÇÃO (SUBSTITUI AS ABAS) ---
-# Usamos um rádio horizontal para simular as abas, mas ele guarda o estado no session_state
-menu_opcoes = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
-escolha = st.radio("Selecione o Painel:", menu_opcoes, horizontal=True, key="navegacao_manual")
+# --- 5. MENU DE NAVEGAÇÃO SUPERIOR ---
+# O rádio guarda a escolha no session_state automaticamente
+menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
+escolha = st.radio("Navegação:", menu, horizontal=True, index=menu.index(st.session_state.pagina_ativa))
 
-# Atualiza a página ativa na memória
+# Salva a escolha para o próximo ciclo de refresh
 st.session_state.pagina_ativa = escolha
+
+st.divider()
 
 # --- PÁGINA 1: OPERADOR ---
 if st.session_state.pagina_ativa == "📲 Terminal Operador":
@@ -101,45 +107,45 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
                 pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
                 st.rerun()
     else:
-        st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Motivo: {chamado_aberto.iloc[0]["Motivo"]}</p><p>Obs: {chamado_aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Motivo: {chamado_aberto.iloc[0]["Motivo"]}</p><p>Observação: {chamado_aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
 
 # --- PÁGINA 2: ASSISTENTE ---
 elif st.session_state.pagina_ativa == "💻 Painel Assistente":
     if not st.session_state.logado:
-        senha_in = st.text_input("Senha de Acesso", type="password")
+        senha_c = st.text_input("Senha de Acesso", type="password")
         if st.button("Entrar"):
-            if senha_in == SENHA:
+            if senha_c == SENHA:
                 st.session_state.logado = True
                 st.rerun()
             else:
                 st.error("Senha incorreta")
     else:
+        # MÉTRICAS COM TEXTO PRETO E SEM NEGRITO
         m1, m2, m3 = st.columns(3)
-        m1.metric("🔴 EM ABERTO", len(ativos))
-        m2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
+        m1.metric("EM ABERTO", len(ativos))
+        m2.metric("RESOLVIDOS HOJE", len(resolvidos_hoje))
         media = resolvidos_hoje['Minutos'].astype(float).mean() if not resolvidos_hoje.empty else 0.0
-        m3.metric("⏱️ TEMPO MÉDIO", f"{media:.1f} min")
+        m3.metric("TEMPO MÉDIO", f"{media:.1f} min")
         
         st.divider()
         if not ativos.empty:
-            st.markdown('<div class="piscante"><h2>⚠️ CHAMADOS PENDENTES!</h2></div>', unsafe_allow_html=True)
+            st.info("⚠️ Existem chamados aguardando atendimento.")
             for i, row in ativos.iterrows():
-                with st.expander(f"🚨 {row['Célula']} - {row['Motivo']} ({row['Início']})", expanded=True):
-                    st.write(f"Observação: {row['Descrição']}")
+                with st.expander(f"Chamado: {row['Célula']} - {row['Motivo']}", expanded=True):
+                    st.write(f"Relato: {row['Descrição']}")
                     acao = st.text_input("Ação Tomada", key=f"re_{row['ID']}")
                     if st.button(f"Finalizar #{row['ID']}", key=f"f_{row['ID']}"):
                         if acao:
                             df_f = pd.read_csv(DB_FILE)
                             idx = df_f[df_f['ID'] == row['ID']].index
-                            h_fim = get_br_time()
+                            agora = get_br_time()
                             h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
-                            df_f.at[idx[0], 'Fim'] = h_fim.strftime("%H:%M:%S")
+                            df_f.at[idx[0], 'Fim'] = agora.strftime("%H:%M:%S")
                             df_f.at[idx[0], 'Status'] = "🟢 Finalizado"
                             df_f.at[idx[0], 'Ação'] = acao
-                            df_f.at[idx[0], 'Minutos'] = round((h_fim - datetime.combine(h_fim.date(), h_ini.time())).total_seconds() / 60, 1)
+                            df_f.at[idx[0], 'Minutos'] = round((agora - datetime.combine(agora.date(), h_ini.time())).total_seconds() / 60, 1)
                             df_f.to_csv(DB_FILE, index=False)
-                            # Agora o rerun volta para esta MESMA página porque o st.radio está salvo
-                            st.rerun()
+                            st.rerun() # Irá recarregar mantendo o st.radio no 'Painel Assistente'
         else:
             st.success("✅ Tudo em ordem!")
 
@@ -147,15 +153,14 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
 elif st.session_state.pagina_ativa == "📊 Indicadores":
     if st.session_state.logado:
         if not dados.empty:
-            datas = sorted(list(set(dados['Data'].unique())), reverse=True)
-            sel_d = st.multiselect("Filtrar Datas:", datas, default=[hoje] if hoje in datas else [])
+            sel_d = st.multiselect("Filtrar Datas:", sorted(dados['Data'].unique(), reverse=True), default=[hoje] if hoje in dados['Data'].values else [])
             df_fig = dados[dados['Data'].isin(sel_d)]
             if not df_fig.empty:
                 g1, g2 = st.columns(2)
                 with g1:
-                    st.plotly_chart(px.bar(df_fig['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Paradas por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
+                    st.plotly_chart(px.bar(df_fig['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Paradas por UPS"), use_container_width=True)
                 with g2:
-                    st.plotly_chart(px.pie(df_fig, names='Motivo', title="Motivos", hole=0.4), use_container_width=True)
+                    st.plotly_chart(px.pie(df_fig, names='Motivo', title="Distribuição de Motivos", hole=0.4), use_container_width=True)
     else:
         st.warning("🔒 Faça login no Painel Assistente.")
 
@@ -163,9 +168,9 @@ elif st.session_state.pagina_ativa == "📊 Indicadores":
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
         st.dataframe(dados.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
-        st.download_button("📥 BAIXAR EXCEL", data=dados.to_csv(index=False).encode('utf-8-sig'), file_name=f'Andon_NHS_{hoje}.csv')
-        with st.expander("ADMIN"):
-            if st.button("LIMPAR TODO O HISTÓRICO"):
+        st.download_button("📥 EXPORTAR CSV", data=dados.to_csv(index=False).encode('utf-8-sig'), file_name=f'Andon_NHS_{hoje}.csv')
+        with st.expander("Admin"):
+            if st.button("LIMPAR BANCO"):
                 if os.path.exists(DB_FILE): os.remove(DB_FILE)
                 st.rerun()
     else:
