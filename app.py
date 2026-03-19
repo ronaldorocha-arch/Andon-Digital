@@ -2,23 +2,20 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import plotly.express as px # Biblioteca para os gráficos
 
 # Configuração da Página
 st.set_page_config(page_title="Andon Digital - NHS", page_icon="🚨", layout="wide")
 
-# Nome do arquivo de banco de dados local
 DB_FILE = "registro_paradas.csv"
 
-# Inicializar o arquivo se não existir
 if not os.path.exists(DB_FILE):
     df_init = pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status"])
     df_init.to_csv(DB_FILE, index=False)
 
 def carregar_dados():
     try:
-        # Lendo e garantindo que o ID seja tratado corretamente
-        df = pd.read_csv(DB_FILE)
-        return df
+        return pd.read_csv(DB_FILE)
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status"])
 
@@ -44,12 +41,12 @@ def finalizar_chamado(id_chamado):
 # --- INTERFACE ---
 st.title("🚨 Sistema Andon - Tecnologia de Processos")
 
-aba_op, aba_as = st.tabs(["📲 Terminal do Operador", "💻 Painel da Assistente"])
+aba_op, aba_as, aba_ind = st.tabs(["📲 Terminal do Operador", "💻 Painel da Assistente", "📊 Indicadores"])
 
-# --- LÓGICA DE DADOS COMPARTILHADA ---
 dados = carregar_dados()
 ativos = dados[dados['Status'] == "🔴 Aberto"]
 
+# --- ABA 1: OPERADOR ---
 with aba_op:
     st.subheader("Registrar Nova Parada")
     col1, col2 = st.columns(2)
@@ -58,49 +55,58 @@ with aba_op:
     with col2:
         sel_motivo = st.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
     
-    desc = st.text_area("O que aconteceu?", placeholder="Descreva o problema aqui...")
-    
+    desc = st.text_area("O que aconteceu?", placeholder="Ex: Falta de componente X")
     if st.button("🔔 CHAMAR ASSISTENTE", type="primary"):
         if desc:
             salvar_chamado(sel_ups, sel_motivo, desc)
-            st.success("Chamado enviado! Aguarde o atendimento.")
+            st.success("Chamado enviado!")
             st.rerun()
-        else:
-            st.warning("Por favor, descreva o problema antes de chamar.")
 
-    # --- NOVIDADE: Confirmação visual para o Operador ---
     if not ativos.empty:
         st.divider()
-        st.subheader("⚠️ Chamados Pendentes no Setor")
-        # Mostra apenas os dados mais importantes para o operador não se confundir
+        st.subheader("⚠️ Chamados Pendentes")
         st.table(ativos[['Célula', 'Motivo', 'Início']])
 
+# --- ABA 2: ASSISTENTE ---
 with aba_as:
-    st.subheader("Painel de Controle da Assistente")
-    
+    st.subheader("Atendimentos em Aberto")
     if ativos.empty:
-        st.info("✅ Nenhuma parada registrada. Todas as linhas operando.")
+        st.info("✅ Tudo em ordem.")
     else:
-        # Exibe os chamados ativos em formato de cartões (expanders)
         for i, row in ativos.iterrows():
-            with st.expander(f"🔴 AGUARDANDO: {row['Célula']} ({row['Início']})", expanded=True):
-                st.write(f"**Motivo:** {row['Motivo']}")
+            with st.expander(f"🔴 {row['Célula']} - {row['Motivo']}", expanded=True):
                 st.write(f"**Detalhe:** {row['Descrição']}")
-                if st.button(f"✅ Finalizar Atendimento {row['ID']}", key=f"btn_as_{row['ID']}"):
+                if st.button(f"✅ Finalizar ID {row['ID']}", key=f"as_{row['ID']}"):
                     finalizar_chamado(row['ID'])
                     st.rerun()
-    
     st.divider()
-    st.subheader("Histórico Completo")
+    st.subheader("Histórico Geral")
     st.dataframe(dados, use_container_width=True, hide_index=True)
 
-# Estilo visual
-st.markdown("""
-    <style>
-    div.stButton > button:first-child {
-        width: 100%;
-        height: 70px;
-        font-size: 24px !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- ABA 3: INDICADORES (A que você pediu!) ---
+with aba_ind:
+    st.subheader("Análise de Paradas")
+    if dados.empty:
+        st.warning("Ainda não há dados para gerar gráficos.")
+    else:
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            # Gráfico de Barras: Chamados por Célula
+            fig_ups = px.bar(dados, x='Célula', title='Chamados por Célula (Acumulado)', 
+                             color_discrete_sequence=['#ff4b4b'])
+            st.plotly_chart(fig_ups, use_container_width=True)
+            
+        with c2:
+            # Gráfico de Pizza: Motivos das Paradas
+            fig_mot = px.pie(dados, names='Motivo', title='Principais Motivos de Parada',
+                             hole=0.4)
+            st.plotly_chart(fig_mot, use_container_width=True)
+
+        st.divider()
+        # Estatística rápida
+        total_paradas = len(dados)
+        st.metric("Total de Ocorrências no Período", f"{total_paradas} Chamados")
+
+# Estilo Botão
+st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-size: 20px; }</style>""", unsafe_allow_html=True)
