@@ -26,6 +26,10 @@ if not os.path.exists(DB_FILE):
 def carregar_dados():
     try:
         df = pd.read_csv(DB_FILE)
+        # SEGURANÇA: Se a coluna Minutos não existir (erro do print), cria ela agora
+        if "Minutos" not in df.columns:
+            df["Minutos"] = 0.0
+            df.to_csv(DB_FILE, index=False)
         return df
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
@@ -36,7 +40,7 @@ def salvar_chamado(celula, motivo, desc):
     novo = {
         "ID": len(df) + 1, "Célula": celula, "Motivo": motivo, "Descrição": desc,
         "Início": agora.strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto",
-        "Data": agora.strftime("%Y-%m-%d"), "Ação": "-", "Minutos": 0
+        "Data": agora.strftime("%Y-%m-%d"), "Ação": "-", "Minutos": 0.0
     }
     pd.concat([df, pd.DataFrame([novo])], ignore_index=True).to_csv(DB_FILE, index=False)
 
@@ -72,7 +76,7 @@ resolvidos_hoje = dados_completos[(dados_completos['Status'] == "🟢 Finalizado
 st.title("🚨 Andon Digital - Tecnologia de Processos")
 aba_op, aba_as, aba_ind = st.tabs(["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores"])
 
-# --- ABA 1: OPERADOR (Limpa e Direta) ---
+# --- ABA 1: OPERADOR ---
 with aba_op:
     st.subheader("Registrar Nova Parada")
     col_a, col_b = st.columns(2)
@@ -88,13 +92,13 @@ with aba_op:
                 salvar_chamado(sel_ups, sel_motivo, desc)
                 st.rerun()
 
-# --- ABA 2: ASSISTENTE (Com Semáforo e Lead Time) ---
+# --- ABA 2: ASSISTENTE ---
 with aba_as:
-    # SEMÁFORO APENAS AQUI
     c1, c2, c3 = st.columns(3)
     c1.metric("🔴 PARADAS AGORA", len(ativos))
     c2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
-    media_tempo = resolvidos_hoje['Minutos'].mean() if not resolvidos_hoje.empty else 0
+    # Cálculo da média com proteção contra erro de coluna
+    media_tempo = resolvidos_hoje['Minutos'].mean() if not resolvidos_hoje.empty else 0.0
     c3.metric("⏱️ LEAD TIME MÉDIO (MIN)", f"{media_tempo:.1f}")
     
     st.divider()
@@ -120,7 +124,6 @@ with aba_as:
 # --- ABA 3: INDICADORES ---
 with aba_ind:
     if not dados_completos.empty:
-        # Filtros de análise
         c_f1, c_f2 = st.columns(2)
         datas_lista = sorted(dados_completos['Data'].unique(), reverse=True)
         data_sel = c_f1.multiselect("Datas:", datas_lista, default=[hoje] if hoje in datas_lista else [])
@@ -133,15 +136,15 @@ with aba_ind:
         if not df_f.empty:
             g1, g2 = st.columns(2)
             with g1:
-                st.plotly_chart(px.bar(df_f, x='Célula', y='Minutos', title='Lead Time por Célula', color='Motivo'), use_container_width=True)
+                st.plotly_chart(px.bar(df_f, x='Célula', y='Minutos', title='Tempo de Parada por Célula', color='Motivo'), use_container_width=True)
             with g2:
                 st.plotly_chart(px.pie(df_f, names='Motivo', title='Volume por Motivo', hole=0.4), use_container_width=True)
         
         st.divider()
         with st.expander("🛠️ Administração"):
             if st.text_input("Senha Admin", type="password") == SENHA_ADMIN:
-                if st.button("⚠️ RESETAR BANCO DE DADOS"):
-                    pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"]).to_csv(DB_FILE, index=False)
+                if st.button("⚠️ RESETAR TUDO"):
+                    if os.path.exists(DB_FILE): os.remove(DB_FILE)
                     st.rerun()
 
 st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-weight: bold; }</style>""", unsafe_allow_html=True)
