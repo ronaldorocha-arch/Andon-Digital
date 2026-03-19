@@ -13,20 +13,15 @@ st_autorefresh(interval=30000, key="datarefresh")
 
 DB_FILE = "registro_paradas.csv"
 SENHA_ADMIN = "12345"
+LISTA_MOTIVOS = ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Problemas com EP", "Outros"]
 
-# --- FUNÇÃO PARA O SOM ---
-def tocar_alerta():
-    audio_html = """<audio autoplay><source src="https://raw.githubusercontent.com/rafaelpernil2/beat-detector/master/resources/sounds/bell.mp3" type="audio/mp3"></audio>"""
-    st.markdown(audio_html, unsafe_allow_html=True)
-
-# --- BASE DE DADOS ---
+# --- FUNÇÕES DE BANCO DE DADOS ---
 if not os.path.exists(DB_FILE):
     pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"]).to_csv(DB_FILE, index=False)
 
 def carregar_dados():
     try:
         df = pd.read_csv(DB_FILE)
-        # SEGURANÇA: Se a coluna Minutos não existir (erro do print), cria ela agora
         if "Minutos" not in df.columns:
             df["Minutos"] = 0.0
             df.to_csv(DB_FILE, index=False)
@@ -67,7 +62,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- INTERFACE ---
+# --- DADOS ATUAIS ---
 dados_completos = carregar_dados()
 hoje = datetime.now().strftime("%Y-%m-%d")
 ativos = dados_completos[dados_completos['Status'] == "🔴 Aberto"]
@@ -81,7 +76,7 @@ with aba_op:
     st.subheader("Registrar Nova Parada")
     col_a, col_b = st.columns(2)
     sel_ups = col_a.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
-    sel_motivo = col_b.selectbox("Motivo", ["Falta de Material", "Qualidade", "Manutenção", "Processo", "Outros"])
+    sel_motivo = col_b.selectbox("Motivo", LISTA_MOTIVOS)
     desc = st.text_area("Descrição do problema", key="op_desc")
     
     if not ativos[ativos['Célula'] == sel_ups].empty:
@@ -94,17 +89,22 @@ with aba_op:
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🔴 PARADAS AGORA", len(ativos))
-    c2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
-    # Cálculo da média com proteção contra erro de coluna
+    col_met1, col_met2, col_met3 = st.columns(3)
+    col_met1.metric("🔴 PARADAS AGORA", len(ativos))
+    col_met2.metric("🟢 RESOLVIDOS HOJE", len(resolvidos_hoje))
     media_tempo = resolvidos_hoje['Minutos'].mean() if not resolvidos_hoje.empty else 0.0
-    c3.metric("⏱️ LEAD TIME MÉDIO (MIN)", f"{media_tempo:.1f}")
+    col_met3.metric("⏱️ LEAD TIME MÉDIO (MIN)", f"{media_tempo:.1f}")
     
+    # BOTÃO PARA ZERAR O DIA
+    if st.button("🗑️ Zerar Contagem de Hoje", help="Apaga todos os registros apenas da data de hoje"):
+        df_limpo = dados_completos[dados_completos['Data'] != hoje]
+        df_limpo.to_csv(DB_FILE, index=False)
+        st.warning("Dados de hoje foram removidos.")
+        st.rerun()
+
     st.divider()
     
     if not ativos.empty:
-        tocar_alerta()
         st.markdown('<div class="piscante"><h2>⚠️ HÁ CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
         for i, row in ativos.iterrows():
             with st.expander(f"🚨 {row['Célula']} ({row['Início']})", expanded=True):
@@ -136,15 +136,20 @@ with aba_ind:
         if not df_f.empty:
             g1, g2 = st.columns(2)
             with g1:
-                st.plotly_chart(px.bar(df_f, x='Célula', y='Minutos', title='Tempo de Parada por Célula', color='Motivo'), use_container_width=True)
+                # CONTAGEM DE PARADAS (Frequency)
+                df_count = df_f['Célula'].value_counts().reset_index()
+                df_count.columns = ['Célula', 'Quantidade']
+                st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', 
+                                      title='Quantidade de Paradas por Célula', 
+                                      color_discrete_sequence=['#ff4b4b'], text_auto=True), use_container_width=True)
             with g2:
-                st.plotly_chart(px.pie(df_f, names='Motivo', title='Volume por Motivo', hole=0.4), use_container_width=True)
+                st.plotly_chart(px.pie(df_f, names='Motivo', title='Distribuição de Motivos', hole=0.4), use_container_width=True)
         
         st.divider()
-        with st.expander("🛠️ Administração"):
+        with st.expander("🛠️ Administração do Sistema"):
             if st.text_input("Senha Admin", type="password") == SENHA_ADMIN:
-                if st.button("⚠️ RESETAR TUDO"):
+                if st.button("⚠️ APAGAR TODO O HISTÓRICO (TOTAL)"):
                     if os.path.exists(DB_FILE): os.remove(DB_FILE)
                     st.rerun()
 
-st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 60px; font-weight: bold; }</style>""", unsafe_allow_html=True)
+st.markdown("""<style>div.stButton > button:first-child { width: 100%; height: 50px; font-weight: bold; }</style>""", unsafe_allow_html=True)
