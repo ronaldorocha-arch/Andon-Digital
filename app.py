@@ -57,28 +57,12 @@ def finalizar_chamado(id_chamado, acao_desc):
         df.at[idx[0], 'Minutos'] = diff_minutos
         df.to_csv(DB_FILE, index=False)
 
-# --- CSS CORRIGIDO PARA PISCAR EM TODO O APP ---
+# --- CSS ---
 st.markdown("""
     <style>
-    @keyframes piscar {
-        0% { background-color: #ff4b4b; }
-        50% { background-color: #9e0000; }
-        100% { background-color: #ff4b4b; }
-    }
-    .piscante {
-        animation: piscar 1s infinite;
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        font-weight: bold;
-        margin-bottom: 20px;
-    }
-    div.stButton > button:first-child {
-        width: 100%;
-        height: 50px;
-        font-weight: bold;
-    }
+    @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #9e0000; } 100% { background-color: #ff4b4b; } }
+    .piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white; text-align: center; font-weight: bold; margin-bottom: 20px; }
+    div.stButton > button:first-child { width: 100%; height: 50px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -95,28 +79,14 @@ with aba_op:
     st.subheader("Registrar Nova Parada")
     col_a, col_b = st.columns(2)
     sel_ups = col_a.selectbox("Célula", ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"])
-    
     chamado_aberto = ativos[ativos['Célula'] == sel_ups]
-    
     if chamado_aberto.empty:
         sel_motivo = col_b.selectbox("Motivo", LISTA_MOTIVOS, key="motivo_op")
         desc = st.text_area("Descrição do problema", key="desc_op")
         if st.button("🔔 CHAMAR AGORA", type="primary"):
-            if desc: 
-                salvar_chamado(sel_ups, sel_motivo, desc)
-                st.rerun()
+            if desc: salvar_chamado(sel_ups, sel_motivo, desc); st.rerun()
     else:
-        # AGORA MOSTRA MOTIVO E DESCRIÇÃO QUE O OPERADOR ESCREVEU
-        motivo_atual = chamado_aberto.iloc[0]['Motivo']
-        desc_atual = chamado_aberto.iloc[0]['Descrição']
-        st.markdown(f"""
-            <div class="piscante">
-                <h1>⏳ AGUARDANDO ASSISTENTE...</h1>
-                <p style='font-size: 22px;'>Célula: <b>{sel_ups}</b></p>
-                <p style='font-size: 18px;'>Motivo: <b>{motivo_atual}</b></p>
-                <p style='font-size: 16px;'>O que você escreveu: <i>"{desc_atual}"</i></p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p style="font-size: 20px;">Célula: <b>{sel_ups}</b> | Motivo: <b>{chamado_aberto.iloc[0]["Motivo"]}</b></p><p><i>"{chamado_aberto.iloc[0]["Descrição"]}"</i></p></div>', unsafe_allow_html=True)
 
 # --- ABA 2: ASSISTENTE ---
 with aba_as:
@@ -127,19 +97,14 @@ with aba_as:
     c3.metric("⏱️ MÉDIA (MIN)", f"{media_tempo:.1f}")
     
     if not ativos.empty:
-        # TÍTULO PISCANTE NO PAINEL DA ASSISTENTE
-        st.markdown('<div class="piscante"><h2>⚠️ ATENÇÃO: HÁ CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
-        
+        st.markdown('<div class="piscante"><h2>⚠️ ATENÇÃO: CHAMADOS EM ABERTO!</h2></div>', unsafe_allow_html=True)
         for i, row in ativos.iterrows():
             with st.expander(f"🚨 {row['Célula']} - {row['Motivo']}", expanded=True):
-                st.write(f"**Descrição do Operador:** {row['Descrição']}")
-                txt_acao = st.text_input(f"O que foi feito? (ID {row['ID']})", key=f"ac_{row['ID']}")
+                st.write(f"**Descrição:** {row['Descrição']}")
+                txt_acao = st.text_input(f"Ação Tomada", key=f"ac_{row['ID']}")
                 if st.button(f"✅ Finalizar {row['ID']}", key=f"bt_{row['ID']}"):
-                    if txt_acao: 
-                        finalizar_chamado(row['ID'], txt_acao)
-                        st.rerun()
-    else:
-        st.info("✅ Sem pendências no momento.")
+                    if txt_acao: finalizar_chamado(row['ID'], txt_acao); st.rerun()
+    else: st.info("✅ Sem pendências.")
     
     st.divider()
     with st.expander("🗑️ Opções de Limpeza"):
@@ -151,22 +116,46 @@ with aba_as:
                 st.rerun()
 
     st.subheader("Histórico Recente")
-    # LARGURAS AJUSTADAS: ID e Célula pequenos
-    st.dataframe(
-        dados_completos.sort_values(by="ID", ascending=False), 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "ID": st.column_config.Column(width="small"),
-            "Célula": st.column_config.Column(width="small"),
-            "Status": st.column_config.Column(width="medium"),
-            "Minutos": st.column_config.Column(width="small")
-        }
-    )
+    st.dataframe(dados_completos.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True,
+                 column_config={"ID": st.column_config.Column(width="small"), "Célula": st.column_config.Column(width="small")})
 
-# --- ABA 3: INDICADORES ---
+# --- ABA 3: INDICADORES (FILTROS DE VOLTA!) ---
 with aba_ind:
+    st.subheader("Filtros de Análise")
     if not dados_completos.empty:
-        df_count = dados_completos[dados_completos['Data'] == hoje_br]['Célula'].value_counts().reset_index()
-        df_count.columns = ['Célula', 'Quantidade']
-        st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', title='Ocorrências de Hoje', color_discrete_sequence=['#ff4b4b']), use_container_width=True)
+        col_f1, col_f2 = st.columns(2)
+        
+        # Filtro de Data
+        datas_disponiveis = sorted(dados_completos['Data'].unique(), reverse=True)
+        data_sel = col_f1.multiselect("1. Selecione as Datas:", datas_disponiveis, default=[hoje_br] if hoje_br in datas_disponiveis else [])
+        
+        # Filtro de Célula
+        ups_disponiveis = sorted(dados_completos['Célula'].unique())
+        ups_sel = col_f2.multiselect("2. Selecione as Células (vazio = todas):", ups_disponiveis)
+
+        # Aplicar Filtros
+        df_filtrado = dados_completos.copy()
+        if data_sel:
+            df_filtrado = df_filtrado[df_filtrado['Data'].isin(data_sel)]
+        if ups_sel:
+            df_filtrado = df_filtrado[df_filtrado['Célula'].isin(ups_sel)]
+
+        if not df_filtrado.empty:
+            st.divider()
+            g1, g2 = st.columns(2)
+            with g1:
+                # Gráfico de Quantidade por Célula
+                df_count = df_filtrado['Célula'].value_counts().reset_index()
+                df_count.columns = ['Célula', 'Quantidade']
+                st.plotly_chart(px.bar(df_count, x='Célula', y='Quantidade', title='Ocorrências por Célula', 
+                                      color_discrete_sequence=['#ff4b4b'], text_auto=True), use_container_width=True)
+            with g2:
+                # Gráfico de Motivos
+                st.plotly_chart(px.pie(df_filtrado, names='Motivo', title='Distribuição por Motivo', hole=0.4), use_container_width=True)
+            
+            st.write("**Detalhamento dos Chamados Filtrados:**")
+            st.dataframe(df_filtrado.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhum dado encontrado para os filtros selecionados.")
+    else:
+        st.warning("Ainda não há dados no sistema.")
