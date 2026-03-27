@@ -1,14 +1,20 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 import os
-import plotly.express as px
+from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO ---
 DB_FILE = "registro_paradas.csv"
+st.set_page_config(page_title="Andon NHS", page_icon="🚨", layout="centered")
 
-def checar_ativos_rapido():
+# Atualiza a tela a cada 5 segundos para checar novos chamados
+st_autorefresh(interval=5000, key="andon_refresh")
+
+def get_br_time():
+    return datetime.utcnow() - timedelta(hours=3)
+
+def checar_chamados_ativos():
     if os.path.exists(DB_FILE):
         try:
             df = pd.read_csv(DB_FILE)
@@ -16,155 +22,119 @@ def checar_ativos_rapido():
         except: return False
     return False
 
-tem_parada = checar_ativos_rapido()
-st.set_page_config(
-    page_title="🚨 CHAMADO! - Andon NHS" if tem_parada else "Andon Digital - NHS",
-    page_icon="🚨",
-    layout="wide"
-)
+tem_chamado = checar_chamados_ativos()
 
-st_autorefresh(interval=5000, key="datarefresh")
-
-if 'logado' not in st.session_state:
-    st.session_state.logado = False
-if 'pagina_ativa' not in st.session_state:
-    st.session_state.pagina_ativa = "📲 Terminal Operador"
-
-SENHA = "12345"
-def get_br_time():
-    return datetime.utcnow() - timedelta(hours=3)
-
-# --- 2. ESTILO CSS ---
+# --- 2. ESTILO VISUAL (APP MOBILE) ---
 st.markdown("""
     <style>
-    @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
-    .alerta-piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white !important; text-align: center; margin-bottom: 20px; font-weight: 400 !important; }
-    html, body, [class*="css"], p, span, label { font-weight: 400 !important; }
-    [data-testid="stMetricValue"] { color: #000000 !important; font-size: 38px; font-weight: 400 !important; }
-    div.stButton > button:first-child { width: 100%; height: 50px; font-weight: 400 !important; }
+    /* Esconder elementos desnecessários do Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Botões Grandes para Polegar */
+    div.stButton > button {
+        width: 100%;
+        height: 70px !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+        border-radius: 12px !important;
+        margin-bottom: 15px;
+    }
+    
+    /* Alerta de Chamado */
+    @keyframes alerta { 0% {background-color: #ff0000;} 50% {background-color: #660000;} 100% {background-color: #ff0000;} }
+    .card-chamado {
+        animation: alerta 0.8s infinite;
+        color: white;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        margin-bottom: 20px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNÇÕES DE DADOS ---
-def carregar_dados():
-    if not os.path.exists(DB_FILE):
-        return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
-    try:
-        df = pd.read_csv(DB_FILE)
-        df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.strftime('%d/%m/%Y')
-        df = df.dropna(subset=['Data'])
-        return df
-    except:
-        return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
-
-# --- SOM (BIP INTERNO) ---
-if tem_parada:
+# --- 3. SISTEMA DE ÁUDIO (SIRENE) ---
+if tem_chamado:
+    # Este código injeta um áudio de sirene que toca em loop
     st.markdown("""
+        <audio autoplay loop id="sirene">
+            <source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mpeg">
+        </audio>
         <script>
-        var context = new (window.AudioContext || window.webkitAudioContext)();
-        var osc = context.createOscillator();
-        osc.frequency.setValueAtTime(880, context.currentTime);
-        osc.connect(context.destination);
-        osc.start();
-        setTimeout(function(){ osc.stop(); }, 300);
+            var audio = document.getElementById('sirene');
+            audio.volume = 1.0;
+            audio.play();
         </script>
         """, unsafe_allow_html=True)
 
-dados = carregar_dados()
-hoje = get_br_time().strftime("%d/%m/%Y")
-ativos = dados[dados['Status'] == "🔴 Aberto"]
-resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
+# --- 4. INTERFACE ---
 
-# --- 4. MENU DE NAVEGAÇÃO ---
-menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
-index_salvo = menu.index(st.session_state.pagina_ativa) if st.session_state.pagina_ativa in menu else 0
-escolha = st.radio("Selecione o Painel:", menu, horizontal=True, index=index_salvo)
-st.session_state.pagina_ativa = escolha
-st.divider()
+st.title("🚨 Andon Digital NHS")
 
-# --- 5. LÓGICA DAS PÁGINAS ---
+# Botão obrigatório para habilitar áudio no navegador
+if "audio_permitido" not in st.session_state:
+    if st.button("🔊 ATIVAR ALERTA SONORO (CLIQUE AQUI)"):
+        st.session_state.audio_permitido = True
+        st.success("Som habilitado!")
+        st.rerun()
 
-if st.session_state.pagina_ativa == "📲 Terminal Operador":
-    st.subheader("Registrar Nova Parada")
-    c1, c2 = st.columns(2)
+tabs = st.tabs(["📲 Operador", "💻 Assistente"])
+
+# --- ABA OPERADOR ---
+with tabs[0]:
+    st.subheader("Registrar Parada")
     ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
-    sel_ups = c1.selectbox("Célula", ups)
-    aberto = ativos[ativos['Célula'] == sel_ups]
+    sel_ups = st.selectbox("Célula:", ups)
     
-    if aberto.empty:
-        lista_problemas = [
-            "Falta de Matéria-prima", 
-            "Qualidade da Matéria-prima",
-            "Composer",
-            "Falha de Abastecimento", 
-            "Problema de Processo", 
-            "Manutenção Equipamento",
-            "Outros"
-        ]
-        motivo_selecionado = c2.selectbox("Qual o problema?", lista_problemas)
-        
-        # Campo de Observação limpo e opcional
-        obs_op = st.text_input("Observação Adicional (Opcional):")
-        
-        if st.button("🔔 ENVIAR CHAMADO", type="primary"):
-            if obs_op:
-                final_desc = f"{motivo_selecionado} - {obs_op}"
-            else:
-                final_desc = motivo_selecionado
+    # Verifica se já tem chamado aberto para essa célula
+    if os.path.exists(DB_FILE):
+        df_verificar = pd.read_csv(DB_FILE)
+        ja_aberto = not df_verificar[(df_verificar['Célula'] == sel_ups) & (df_verificar['Status'] == "🔴 Aberto")].empty
+    else:
+        ja_aberto = False
 
-            nid = dados['ID'].max() + 1 if not dados.empty else 1
-            novo = pd.DataFrame([{"ID": int(nid), "Célula": sel_ups, "Motivo": motivo_selecionado, "Descrição": final_desc, "Início": get_br_time().strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto", "Data": hoje, "Ação": "-", "Minutos": 0.0}])
-            pd.concat([dados, novo], ignore_index=True).to_csv(DB_FILE, index=False)
+    if not ja_aberto:
+        motivos = ["Material", "Qualidade", "Processo", "Manutenção", "Outros"]
+        motivo = st.radio("Motivo:", motivos, horizontal=True)
+        obs = st.text_input("Detalhes:")
+        
+        if st.button("🚨 ENVIAR CHAMADO", type="primary"):
+            agora = get_br_time()
+            if os.path.exists(DB_FILE):
+                df = pd.read_csv(DB_FILE)
+                nid = df['ID'].max() + 1
+            else:
+                df = pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Minutos"])
+                nid = 1
+            
+            novo = pd.DataFrame([{"ID": nid, "Célula": sel_ups, "Motivo": motivo, "Descrição": f"{motivo}: {obs}", "Início": agora.strftime("%H:%M:%S"), "Fim": "-", "Status": "🔴 Aberto", "Data": agora.strftime("%d/%m/%Y"), "Minutos": 0}])
+            pd.concat([df, novo]).to_csv(DB_FILE, index=False)
             st.rerun()
     else:
-        st.markdown(f'<div class="alerta-piscante"><h1>⏳ AGUARDANDO ASSISTENTE...</h1><p>Célula: {sel_ups} | Problema: {aberto.iloc[0]["Descrição"]}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-chamado"><h2>⏳ AGUARDANDO APOIO</h2><p>{sel_ups}</p></div>', unsafe_allow_html=True)
 
-elif st.session_state.pagina_ativa == "💻 Painel Assistente":
-    if not st.session_state.logado:
-        senha = st.text_input("Senha", type="password")
-        if st.button("Entrar"):
-            if senha == SENHA: st.session_state.logado = True; st.rerun()
-    else:
-        m1, m2, m3 = st.columns(3)
-        m1.metric("EM ABERTO", len(ativos))
-        m2.metric("RESOLVIDOS HOJE", len(resolvidos_hoje))
-        med = resolvidos_hoje['Minutos'].astype(float).mean() if not resolvidos_hoje.empty else 0.0
-        m3.metric("TEMPO MÉDIO", f"{med:.1f} min")
-        st.divider()
-        if not ativos.empty:
-            st.markdown('<div class="alerta-piscante">⚠️ ATENÇÃO: HÁ CHAMADOS PENDENTES!</div>', unsafe_allow_html=True)
-            for i, r in ativos.iterrows():
-                with st.expander(f"Célula: {r['Célula']} - Detalhe: {r['Descrição']}", expanded=True):
-                    ac = st.text_input("Ação Tomada (Opcional):", key=f"ac_{r['ID']}")
-                    if st.button(f"Concluir Atendimento #{r['ID']}", key=f"f_{r['ID']}"):
-                        df_f = pd.read_csv(DB_FILE)
-                        idx = df_f[df_f['ID'] == r['ID']].index
+# --- ABA ASSISTENTE ---
+with tabs[1]:
+    st.subheader("Chamados Ativos")
+    if os.path.exists(DB_FILE):
+        df_painel = pd.read_csv(DB_FILE)
+        abertos = df_painel[df_painel['Status'] == "🔴 Aberto"]
+        
+        if abertos.empty:
+            st.success("✅ Nenhuma parada no momento.")
+        else:
+            for _, r in abertos.iterrows():
+                with st.container():
+                    st.error(f"**{r['Célula']}** | Início: {r['Início']}")
+                    st.write(f"Problema: {r['Descrição']}")
+                    if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"fin_{r['ID']}"):
                         ag = get_br_time()
-                        h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
-                        df_f.at[idx[0], 'Fim'] = ag.strftime("%H:%M:%S")
-                        df_f.at[idx[0], 'Status'] = "🟢 Finalizado"
-                        df_f.at[idx[0], 'Ação'] = ac if ac else "Atendimento Concluído"
-                        df_f.at[idx[0], 'Minutos'] = round((ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60, 1)
-                        df_f.to_csv(DB_FILE, index=False); st.rerun()
-        else: st.success("✅ Tudo em ordem!")
-
-elif st.session_state.pagina_ativa == "📊 Indicadores":
-    if st.session_state.logado:
-        st.subheader("🔍 Filtros de Análise")
-        if not dados.empty:
-            c_f1, c_f2 = st.columns(2)
-            d_list = sorted(list(set(dados['Data'].unique())), reverse=True)
-            s_d = c_f1.multiselect("Datas:", d_list, default=[hoje] if hoje in d_list else [])
-            s_u = c_f2.multiselect("Células:", sorted(dados['Célula'].unique()))
-            df_i = dados.copy()
-            if s_d: df_i = df_i[df_i['Data'].isin(s_d)]
-            if s_u: df_i = df_i[df_i['Célula'].isin(s_u)]
-            if not df_i.empty:
-                g1, g2 = st.columns(2)
-                with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por UPS", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
-                with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
-
-elif st.session_state.pagina_ativa == "📂 Relatórios":
-    if st.session_state.logado:
-        st.dataframe(dados.sort_values(by="ID", ascending=False), use_container_width=True, hide_index=True)
-        st.download_button("📥 EXPORTAR CSV", data=dados.to_csv(index=False).encode('utf-8-sig'), file_name=f'Andon_NHS_{hoje}.csv')
+                        df_painel.loc[df_painel['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
+                        df_painel.loc[df_painel['ID'] == r['ID'], 'Fim'] = ag.strftime("%H:%M:%S")
+                        # Cálculo de minutos
+                        h_ini = datetime.strptime(r['Início'], "%H:%M:%S")
+                        duracao = (ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60
+                        df_painel.loc[df_painel['ID'] == r['ID'], 'Minutos'] = round(duracao, 1)
+                        df_painel.to_csv(DB_FILE, index=False)
+                        st.rerun()
