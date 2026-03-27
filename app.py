@@ -6,160 +6,135 @@ import time
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES TÉCNICAS ---
+# --- 1. CONFIGURAÇÃO ---
 DB_FILE = "registro_paradas.csv"
-# IMPORTANTE: Use este mesmo nome no tópico do App ntfy no celular
 NTFY_TOPIC = "andon_nhs_curitiba_producao" 
 
 st.set_page_config(page_title="Andon NHS", page_icon="🚨", layout="centered")
 
-# Atualização do painel a cada 2 segundos para resposta rápida
-st_autorefresh(interval=2000, key="andon_refresh_final")
+# Atualização do painel a cada 2 segundos
+st_autorefresh(interval=2000, key="andon_refresh_v7")
 
 def get_br_time():
-    """Retorna o horário atual de Brasília"""
+    """Retorna o horário de Brasília"""
     return datetime.utcnow() - timedelta(hours=3)
 
-def enviar_notificacao_push(titulo, mensagem):
+def disparar_alerta_2x(titulo, mensagem):
     """
-    Envia o alerta para o celular do assistente.
-    O uso de X-Message-ID com timestamp força o celular a tocar em todas as tentativas.
+    Envia a notificação exatamente 2 vezes para o telemóvel.
+    O intervalo de 1.5s garante que o sistema operacional processe os dois sons.
     """
-    try:
-        # Gera um ID único baseado nos milissegundos para evitar agrupamento de notificações
-        msg_id = str(int(time.time() * 1000))
-        
-        requests.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=mensagem.encode('utf-8'),
-            headers={
-                "Title": titulo.encode('utf-8'),
-                "Priority": "5",          # Prioridade MÁXIMA (Urgente)
-                "Tags": "rotating_light,warning,fire",
-                "X-Message-ID": msg_id,   # Força o toque individual
-                "X-Priority": "5"
-            }, 
-            timeout=5
-        )
-    except Exception as e:
-        st.error(f"Erro ao disparar alerta: {e}")
+    for i in range(2):
+        try:
+            # ID único para cada um dos 2 toques para o telemóvel não ignorar
+            msg_id = f"{int(time.time())}_{i}"
+            
+            requests.post(
+                f"https://ntfy.sh/{NTFY_TOPIC}",
+                data=f"{mensagem} (Alerta {i+1}/2)".encode('utf-8'),
+                headers={
+                    "Title": titulo.encode('utf-8'),
+                    "Priority": "5",
+                    "Tags": "warning,bell",
+                    "X-Message-ID": msg_id
+                }, 
+                timeout=5
+            )
+            if i == 0:
+                time.sleep(1.5) # Espera 1.5 segundos antes do segundo toque
+        except:
+            pass
 
 def carregar_dados():
-    """Lê o banco de dados CSV com segurança"""
     if not os.path.exists(DB_FILE):
-        return pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo", "Minutos"])
+        return pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo"])
     try:
         return pd.read_csv(DB_FILE)
     except:
-        return pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo", "Minutos"])
+        return pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo"])
 
-# --- 2. ESTILO VISUAL (LAYOUT DE FÁBRICA) ---
+# --- 2. ESTILO VISUAL ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Botões gigantes para facilitar o clique na linha de produção */
     div.stButton > button {
         width: 100%;
-        height: 90px !important;
-        font-size: 24px !important;
+        height: 85px !important;
+        font-size: 22px !important;
         font-weight: bold !important;
         border-radius: 15px !important;
-        box-shadow: 0px 4px 15px rgba(0,0,0,0.3);
     }
-    
-    /* Card de Alerta Piscante */
-    @keyframes pisca_vermelho { 0% {background-color: #ff0000;} 50% {background-color: #660000;} 100% {background-color: #ff0000;} }
-    .card-emergencia {
-        animation: pisca_vermelho 0.8s infinite;
+    @keyframes pisca { 0% {background-color: red;} 50% {background-color: #800000;} 100% {background-color: red;} }
+    .card-alerta {
+        animation: pisca 1s infinite;
         color: white;
         padding: 30px;
         border-radius: 20px;
         text-align: center;
-        font-size: 28px;
+        font-size: 26px;
         font-weight: bold;
-        margin-bottom: 20px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. LOGICA DO SISTEMA ---
-df_atual = carregar_dados()
-ativos = df_atual[df_atual['Status'] == "🔴 Aberto"]
+# --- 3. LÓGICA E INTERFACE ---
+st.title("🚨 Andon NHS - Alerta Duplo")
 
-st.title("🚨 Andon NHS - Curitiba")
+df = carregar_dados()
+ativos = df[df['Status'] == "🔴 Aberto"]
 
-tabs = st.tabs(["📲 Operador (Abrir Chamado)", "💻 Assistente (Atender)"])
+tabs = st.tabs(["📲 Operador", "💻 Assistente"])
 
-# --- ABA OPERADOR (LINHA DE PRODUÇÃO) ---
+# --- ABA OPERADOR ---
 with tabs[0]:
-    st.subheader("Registrar Parada de Máquina/Processo")
-    ups_lista = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
-    sel_ups = st.selectbox("Selecione sua Célula:", ups_lista)
+    st.subheader("Abrir Chamado")
+    ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
+    sel_ups = st.selectbox("Célula:", ups)
     
-    # Bloqueia novo chamado se já houver um aberto para a mesma célula
-    esta_parada = not ativos[ativos['Célula'] == sel_ups].empty
+    # Verifica se já existe chamado para esta célula
+    ja_aberto = not ativos[ativos['Célula'] == sel_ups].empty
 
-    if not esta_parada:
-        motivos = ["Falta de Material", "Qualidade", "Falha de Equipamento", "Dúvida de Processo", "Outros"]
-        motivo_escolhido = st.radio("Qual o motivo da parada?", motivos, horizontal=True)
-        
-        if st.button("🔔 DISPARAR CHAMADO", type="primary"):
+    if not ja_aberto:
+        if st.button("🚨 ENVIAR CHAMADO", type="primary"):
             agora = get_br_time()
             
-            # 1. DISPARA O PUSH (Vibra e Toca no Celular)
-            enviar_notificacao_push(
-                titulo=f"🚨 PARADA: {sel_ups}", 
-                mensagem=f"{motivo_escolhido} às {agora.strftime('%H:%M:%S')}"
-            )
-            
-            # 2. REGISTRA NO CSV
-            proximo_id = df_atual['ID'].max() + 1 if not df_atual.empty else 1
-            novo_registro = pd.DataFrame([{
-                "ID": proximo_id, 
+            # 1. SALVAR NO CSV PRIMEIRO
+            nid = df['ID'].max() + 1 if not df.empty else 1
+            novo = pd.DataFrame([{
+                "ID": nid, 
                 "Célula": sel_ups, 
                 "Status": "🔴 Aberto", 
                 "Início": agora.strftime("%H:%M:%S"), 
                 "Data": agora.strftime("%d/%m/%Y"),
-                "Motivo": motivo_escolhido,
-                "Minutos": 0
+                "Motivo": "Chamado de Apoio"
             }])
-            pd.concat([df_atual, novo_registro]).to_csv(DB_FILE, index=False)
+            pd.concat([df, novo]).to_csv(DB_FILE, index=False)
             
-            st.success("Chamado enviado! O assistente foi notificado.")
+            # 2. DISPARAR OS 2 TOQUES NO TELEMÓVEL
+            disparar_alerta_2x(f"🚨 PARADA: {sel_ups}", f"Acionado às {agora.strftime('%H:%M:%S')}")
+            
+            st.success("Chamado enviado! O telemóvel irá tocar 2 vezes.")
             st.rerun()
     else:
-        st.markdown(f'<div class="card-emergencia">⏳ AGUARDANDO ASSISTENTE<br>{sel_ups}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-alerta">⏳ AGUARDANDO APOIO<br>{sel_ups}</div>', unsafe_allow_html=True)
 
-# --- ABA ASSISTENTE (ATENDIMENTO) ---
+# --- ABA ASSISTENTE ---
 with tabs[1]:
-    st.subheader("Chamados Pendentes")
+    st.subheader("Chamados Ativos")
     if not ativos.empty:
-        for index, row in ativos.iterrows():
+        for _, r in ativos.iterrows():
             with st.container():
-                st.error(f"⚠️ **{row['Célula']}** | Aberto às: {row['Início']}")
-                st.info(f"Motivo: {row['Motivo']}")
-                
-                if st.button(f"✅ FINALIZAR ATENDIMENTO {row['Célula']}", key=f"btn_{row['ID']}"):
-                    agora_fim = get_br_time()
-                    
-                    # Atualiza o CSV
-                    df_atual.loc[df_atual['ID'] == row['ID'], 'Status'] = "🟢 Finalizado"
-                    
-                    # Cálculo de tempo de resposta (opcional)
-                    h_ini = datetime.strptime(row['Início'], "%H:%M:%S")
-                    duracao = (agora_fim - datetime.combine(agora_fim.date(), h_ini.time())).total_seconds() / 60
-                    df_atual.loc[df_atual['ID'] == row['ID'], 'Minutos'] = round(duracao, 1)
-                    
-                    df_atual.to_csv(DB_FILE, index=False)
+                st.error(f"⚠️ **{r['Célula']}** | Início: {r['Início']}")
+                if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"btn_{r['ID']}"):
+                    df.loc[df['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
+                    df.to_csv(DB_FILE, index=False)
                     st.rerun()
     else:
-        st.success("✅ Nenhuma pendência. Linhas em operação normal.")
+        st.success("✅ Nenhuma parada ativa.")
 
-# --- DICAS DE CONFIGURAÇÃO (LATERAL) ---
-st.sidebar.title("⚙️ Configurações")
-st.sidebar.markdown(f"**Tópico Push:** `{NTFY_TOPIC}`")
-st.sidebar.write("1. No app **ntfy**, siga este tópico.")
-st.sidebar.write("2. No celular, mude o som para um **Alarme longo**.")
-st.sidebar.write("3. Desative a 'Otimização de Bateria' para o ntfy.")
+# --- INFO LATERAL ---
+st.sidebar.markdown("### ⚙️ Ajuste de Som")
+st.sidebar.info(f"Tópico: **{NTFY_TOPIC}**")
+st.sidebar.write("1. No App **ntfy**, escolha um som **CURTO**.")
+st.sidebar.write("2. O sistema enviará 2 pulsos de som.")
