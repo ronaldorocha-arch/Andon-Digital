@@ -13,18 +13,19 @@ NTFY_TOPIC = "andon_nhs_curitiba_producao"
 st.set_page_config(page_title="Andon NHS", page_icon="🚨", layout="centered")
 
 # Atualização do painel a cada 2 segundos
-st_autorefresh(interval=2000, key="andon_refresh_v8")
+st_autorefresh(interval=2000, key="andon_refresh_v9")
 
 def get_br_time():
     return datetime.utcnow() - timedelta(hours=3)
 
 def disparar_alerta_2x(titulo, mensagem):
     """
-    Envia 2 notificações como 'Mensagem Comum'.
-    Isso faz o celular dar 2 bips e PARAR sozinho.
+    Envia 2 notificações com Prioridade 4 (Alta).
+    Isso garante que o celular VIBRE e TOQUE, mas pare sozinho.
     """
     for i in range(2):
         try:
+            # ID único para garantir que o segundo toque ocorra
             msg_id = f"{int(time.time())}_{i}"
             
             requests.post(
@@ -32,14 +33,15 @@ def disparar_alerta_2x(titulo, mensagem):
                 data=f"{mensagem}".encode('utf-8'),
                 headers={
                     "Title": titulo.encode('utf-8'),
-                    "Priority": "3",          # MUDADO PARA 3 (Normal): Faz o som e para sozinho
-                    "Tags": "bell",           # Tag simples de sino
+                    "Priority": "4",          # PRIORIDADE 4: Acorda o celular e vibra, mas não trava o som
+                    "Tags": "warning,bell",
                     "X-Message-ID": msg_id
                 }, 
                 timeout=5
             )
+            # Pequeno intervalo entre os bips
             if i == 0:
-                time.sleep(1.0) # Espera 1 segundo entre os bips
+                time.sleep(1.2) 
         except:
             pass
 
@@ -51,7 +53,7 @@ def carregar_dados():
     except:
         return pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo"])
 
-# --- 2. ESTILO VISUAL ---
+# --- 2. ESTILO ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -76,17 +78,16 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. LÓGICA E INTERFACE ---
-st.title("🚨 Andon NHS - Alerta 2 Bips")
+# --- 3. INTERFACE ---
+st.title("🚨 Andon NHS - Alerta 2x Garantido")
 
 df = carregar_dados()
 ativos = df[df['Status'] == "🔴 Aberto"]
 
-tabs = st.tabs(["📲 Operador", "💻 Assistente"])
+tab1, tab2 = st.tabs(["📲 Operador", "💻 Assistente"])
 
-# --- ABA OPERADOR ---
-with tabs[0]:
-    st.subheader("Registrar Parada")
+with tab1:
+    st.subheader("Abrir Chamado")
     ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
     sel_ups = st.selectbox("Célula:", ups)
     
@@ -105,20 +106,19 @@ with tabs[0]:
             }])
             pd.concat([df, novo]).to_csv(DB_FILE, index=False)
             
-            # DISPARAR OS 2 BIPS QUE PARAM SOZINHOS
+            # DISPARAR 2 BIPS COM VIBRAÇÃO
             disparar_alerta_2x(f"🚨 PARADA: {sel_ups}", f"Chamado às {agora.strftime('%H:%M')}")
             
-            st.success("Chamado enviado! O celular vai dar 2 bips rápidos.")
+            st.success("Chamado enviado! O celular vai vibrar e apitar 2 vezes.")
             st.rerun()
     else:
         st.markdown(f'<div class="card-alerta">⏳ AGUARDANDO APOIO<br>{sel_ups}</div>', unsafe_allow_html=True)
 
-# --- ABA ASSISTENTE ---
-with tabs[1]:
+with tab2:
     st.subheader("Chamados Ativos")
     if not ativos.empty:
         for _, r in ativos.iterrows():
-            st.error(f"⚠️ **{r['Célula']}** | {r['Início']}")
+            st.error(f"⚠️ **{r['Célula']}** | Início: {r['Início']}")
             if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"f_{r['ID']}"):
                 df.loc[df['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
                 df.to_csv(DB_FILE, index=False)
