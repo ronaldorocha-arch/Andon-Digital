@@ -13,35 +13,33 @@ NTFY_TOPIC = "andon_nhs_curitiba_producao"
 st.set_page_config(page_title="Andon NHS", page_icon="🚨", layout="centered")
 
 # Atualização do painel a cada 2 segundos
-st_autorefresh(interval=2000, key="andon_refresh_v7")
+st_autorefresh(interval=2000, key="andon_refresh_v8")
 
 def get_br_time():
-    """Retorna o horário de Brasília"""
     return datetime.utcnow() - timedelta(hours=3)
 
 def disparar_alerta_2x(titulo, mensagem):
     """
-    Envia a notificação exatamente 2 vezes para o telemóvel.
-    O intervalo de 1.5s garante que o sistema operacional processe os dois sons.
+    Envia 2 notificações como 'Mensagem Comum'.
+    Isso faz o celular dar 2 bips e PARAR sozinho.
     """
     for i in range(2):
         try:
-            # ID único para cada um dos 2 toques para o telemóvel não ignorar
             msg_id = f"{int(time.time())}_{i}"
             
             requests.post(
                 f"https://ntfy.sh/{NTFY_TOPIC}",
-                data=f"{mensagem} (Alerta {i+1}/2)".encode('utf-8'),
+                data=f"{mensagem}".encode('utf-8'),
                 headers={
                     "Title": titulo.encode('utf-8'),
-                    "Priority": "5",
-                    "Tags": "warning,bell",
+                    "Priority": "3",          # MUDADO PARA 3 (Normal): Faz o som e para sozinho
+                    "Tags": "bell",           # Tag simples de sino
                     "X-Message-ID": msg_id
                 }, 
                 timeout=5
             )
             if i == 0:
-                time.sleep(1.5) # Espera 1.5 segundos antes do segundo toque
+                time.sleep(1.0) # Espera 1 segundo entre os bips
         except:
             pass
 
@@ -79,7 +77,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 3. LÓGICA E INTERFACE ---
-st.title("🚨 Andon NHS - Alerta Duplo")
+st.title("🚨 Andon NHS - Alerta 2 Bips")
 
 df = carregar_dados()
 ativos = df[df['Status'] == "🔴 Aberto"]
@@ -88,33 +86,29 @@ tabs = st.tabs(["📲 Operador", "💻 Assistente"])
 
 # --- ABA OPERADOR ---
 with tabs[0]:
-    st.subheader("Abrir Chamado")
+    st.subheader("Registrar Parada")
     ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
     sel_ups = st.selectbox("Célula:", ups)
     
-    # Verifica se já existe chamado para esta célula
     ja_aberto = not ativos[ativos['Célula'] == sel_ups].empty
 
     if not ja_aberto:
         if st.button("🚨 ENVIAR CHAMADO", type="primary"):
             agora = get_br_time()
             
-            # 1. SALVAR NO CSV PRIMEIRO
+            # SALVAR NO CSV
             nid = df['ID'].max() + 1 if not df.empty else 1
             novo = pd.DataFrame([{
-                "ID": nid, 
-                "Célula": sel_ups, 
-                "Status": "🔴 Aberto", 
-                "Início": agora.strftime("%H:%M:%S"), 
-                "Data": agora.strftime("%d/%m/%Y"),
-                "Motivo": "Chamado de Apoio"
+                "ID": nid, "Célula": sel_ups, "Status": "🔴 Aberto", 
+                "Início": agora.strftime("%H:%M:%S"), "Data": agora.strftime("%d/%m/%Y"),
+                "Motivo": "Apoio solicitado"
             }])
             pd.concat([df, novo]).to_csv(DB_FILE, index=False)
             
-            # 2. DISPARAR OS 2 TOQUES NO TELEMÓVEL
-            disparar_alerta_2x(f"🚨 PARADA: {sel_ups}", f"Acionado às {agora.strftime('%H:%M:%S')}")
+            # DISPARAR OS 2 BIPS QUE PARAM SOZINHOS
+            disparar_alerta_2x(f"🚨 PARADA: {sel_ups}", f"Chamado às {agora.strftime('%H:%M')}")
             
-            st.success("Chamado enviado! O telemóvel irá tocar 2 vezes.")
+            st.success("Chamado enviado! O celular vai dar 2 bips rápidos.")
             st.rerun()
     else:
         st.markdown(f'<div class="card-alerta">⏳ AGUARDANDO APOIO<br>{sel_ups}</div>', unsafe_allow_html=True)
@@ -124,17 +118,10 @@ with tabs[1]:
     st.subheader("Chamados Ativos")
     if not ativos.empty:
         for _, r in ativos.iterrows():
-            with st.container():
-                st.error(f"⚠️ **{r['Célula']}** | Início: {r['Início']}")
-                if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"btn_{r['ID']}"):
-                    df.loc[df['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
-                    df.to_csv(DB_FILE, index=False)
-                    st.rerun()
+            st.error(f"⚠️ **{r['Célula']}** | {r['Início']}")
+            if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"f_{r['ID']}"):
+                df.loc[df['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
+                df.to_csv(DB_FILE, index=False)
+                st.rerun()
     else:
         st.success("✅ Nenhuma parada ativa.")
-
-# --- INFO LATERAL ---
-st.sidebar.markdown("### ⚙️ Ajuste de Som")
-st.sidebar.info(f"Tópico: **{NTFY_TOPIC}**")
-st.sidebar.write("1. No App **ntfy**, escolha um som **CURTO**.")
-st.sidebar.write("2. O sistema enviará 2 pulsos de som.")
