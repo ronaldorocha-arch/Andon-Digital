@@ -2,17 +2,18 @@ import streamlit as st
 import pandas as pd
 import os
 import requests
+import time
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO ---
 DB_FILE = "registro_paradas.csv"
-# Tópico único para sua fábrica (mude se quiser mais privacidade)
+# Tópico para o app ntfy (instale o app e siga este tópico)
 NTFY_TOPIC = "andon_nhs_curitiba_producao" 
 
 st.set_page_config(page_title="Andon NHS", page_icon="🚨", layout="centered")
 
-# Atualiza a tela a cada 5 segundos para verificar novos chamados
+# Atualiza a interface a cada 5 segundos
 st_autorefresh(interval=5000, key="andon_refresh")
 
 def get_br_time():
@@ -20,140 +21,141 @@ def get_br_time():
 
 def enviar_notificacao_push(titulo, mensagem):
     """
-    Envia alerta de alta prioridade para o App ntfy.
-    Isso faz o celular vibrar e apitar mesmo bloqueado.
+    Envia alerta de prioridade MÁXIMA.
+    O uso do timestamp (time.time()) garante que o celular vibre em TODAS as tentativas.
     """
     try:
+        # Gera um ID único para cada disparo
+        msg_id = str(int(time.time()))
+        
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
             data=mensagem.encode('utf-8'),
             headers={
                 "Title": titulo,
-                "Priority": "5", # Prioridade MÁXIMA (Urgente)
+                "Priority": "5", # Prioridade Urgente
                 "Tags": "rotating_light,warning,fire",
-                "Actions": "view, Abrir Painel, https://seu-link-do-streamlit.app"
+                "X-Message-ID": msg_id, # Força o celular a tratar como nova mensagem
+                "X-Priority": "5",
+                "X-Title": titulo.encode('utf-8')
             }, timeout=5)
-    except:
-        pass
+    except Exception as e:
+        print(f"Erro ao enviar push: {e}")
 
-def checar_ativos():
+def checar_chamados_ativos():
     if os.path.exists(DB_FILE):
-        df = pd.read_csv(DB_FILE)
-        return not df[df['Status'] == "🔴 Aberto"].empty
+        try:
+            df = pd.read_csv(DB_FILE)
+            return not df[df['Status'] == "🔴 Aberto"].empty
+        except: return False
     return False
 
-tem_chamado = checar_ativos()
+tem_parada = checar_chamados_ativos()
 
-# --- 2. ESTILO VISUAL ---
+# --- 2. ESTILO VISUAL APP ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* Botões Grandes para Operação de Fábrica */
+    /* Botões Grandes para Uso em Fábrica */
     div.stButton > button {
         width: 100%;
-        height: 80px !important;
-        font-size: 20px !important;
+        height: 85px !important;
+        font-size: 22px !important;
         font-weight: bold !important;
         border-radius: 15px !important;
-        margin-bottom: 10px;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.2);
     }
     
-    /* Card de Alerta Piscante */
-    @keyframes pisca { 0% {background-color: #ff4b4b;} 50% {background-color: #800000;} 100% {background-color: #ff4b4b;} }
-    .alerta-card {
-        animation: pisca 1s infinite;
+    /* Alerta Visual de Chamado */
+    @keyframes pisca { 0% {background-color: #ff0000;} 50% {background-color: #800000;} 100% {background-color: #ff0000;} }
+    .card-alerta {
+        animation: pisca 0.8s infinite;
         color: white;
-        padding: 25px;
-        border-radius: 15px;
+        padding: 30px;
+        border-radius: 20px;
         text-align: center;
-        margin-bottom: 20px;
-        font-size: 24px;
+        font-size: 28px;
+        font-weight: bold;
+        margin-bottom: 25px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. JAVASCRIPT PARA VIBRAÇÃO (SE ABA ABERTA) ---
-if tem_chamado:
-    st.markdown("""
-        <script>
-        if (navigator.vibrate) {
-            // Vibra em padrão de alerta repetido
-            navigator.vibrate([500, 300, 500, 300, 500]);
-        }
-        </script>
-        """, unsafe_allow_html=True)
+# --- 3. INTERFACE ---
+st.title("🚨 Andon NHS - Produção")
 
-# --- 4. INTERFACE ---
-st.title("🚨 Andon Digital - NHS")
+tabs = st.tabs(["📲 Operador (Abrir)", "💻 Assistente (Atender)"])
 
-# Instrução de configuração do Push
-with st.expander("📲 Configurar Alerta no Bolso (Clique aqui)"):
-    st.write(f"""
-    1. Instale o app **ntfy** (Play Store ou App Store).
-    2. Clique no '+' e digite o tópico: `{NTFY_TOPIC}`.
-    3. Nas configurações do ntfy no celular, coloque a prioridade como **MÁXIMA**.
-    """)
-
-tabs = st.tabs(["📲 Operador", "💻 Painel Assistente"])
-
-# --- ABA DO OPERADOR (LINHA DE PRODUÇÃO) ---
+# --- ABA OPERADOR ---
 with tabs[0]:
-    st.subheader("Registrar Nova Parada")
+    st.subheader("Nova Parada de Linha")
     ups = ["UPS - 1", "UPS - 2", "UPS - 3", "UPS - 4", "UPS - 6", "UPS - 7", "UPS - 8", "ACS - 01"]
     sel_ups = st.selectbox("Selecione sua Célula:", ups)
     
-    # Checa se já existe chamado aberto para essa célula específica
+    # Verifica se a célula já está com chamado aberto
     ja_aberto = False
     if os.path.exists(DB_FILE):
-        df_check = pd.read_csv(DB_FILE)
-        ja_aberto = not df_check[(df_check['Célula'] == sel_ups) & (df_check['Status'] == "🔴 Aberto")].empty
+        df_verificacao = pd.read_csv(DB_FILE)
+        ja_aberto = not df_verificacao[(df_verificacao['Célula'] == sel_ups) & (df_verificacao['Status'] == "🔴 Aberto")].empty
 
     if not ja_aberto:
-        motivos = ["Material", "Qualidade", "Processo", "Manutenção", "Outros"]
-        motivo = st.radio("Qual o problema?", motivos, horizontal=True)
-        obs = st.text_input("Observação (Opcional):")
+        motivos = ["Falta de Material", "Qualidade", "Falha Equipamento", "Problema Processo", "Outros"]
+        motivo_sel = st.radio("Motivo Principal:", motivos, horizontal=True)
+        detalhe = st.text_input("Breve detalhe (Opcional):")
         
-        if st.button("🔔 ENVIAR CHAMADO", type="primary"):
+        if st.button("🚨 DISPARAR ALERTA", type="primary"):
             agora = get_br_time()
-            df = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame(columns=["ID", "Célula", "Motivo", "Início", "Status", "Data"])
+            # Carrega banco de dados
+            if os.path.exists(DB_FILE):
+                df = pd.read_csv(DB_FILE)
+                nid = df['ID'].max() + 1 if not df.empty else 1
+            else:
+                df = pd.DataFrame(columns=["ID", "Célula", "Status", "Início", "Data", "Motivo"])
+                nid = 1
             
-            nid = df['ID'].max() + 1 if not df.empty else 1
-            novo = pd.DataFrame([{
-                "ID": nid, "Célula": sel_ups, "Motivo": motivo, 
-                "Início": agora.strftime("%H:%M:%S"), "Status": "🔴 Aberto", 
-                "Data": agora.strftime("%d/%m/%Y")
+            # Salva o novo registro
+            novo_chamado = pd.DataFrame([{
+                "ID": nid, "Célula": sel_ups, "Status": "🔴 Aberto", 
+                "Início": agora.strftime("%H:%M:%S"), 
+                "Data": agora.strftime("%d/%m/%Y"),
+                "Motivo": f"{motivo_sel}: {detalhe}"
             }])
+            pd.concat([df, novo_chamado]).to_csv(DB_FILE, index=False)
             
-            pd.concat([df, novo]).to_csv(DB_FILE, index=False)
-            
-            # DISPARA O PUSH PARA O CELULAR
+            # ENVIA O PUSH QUE VIBRA O CELULAR
             enviar_notificacao_push(
-                titulo=f"🚨 CHAMADO: {sel_ups}",
-                mensagem=f"Problema: {motivo} | Hora: {agora.strftime('%H:%M')}"
+                titulo=f"CHAMADO: {sel_ups}",
+                mensagem=f"{motivo_sel} às {agora.strftime('%H:%M')}"
             )
             
-            st.success("Chamado enviado! O assistente foi notificado.")
+            st.success("✅ Alerta enviado!")
             st.rerun()
     else:
-        st.markdown(f'<div class="alerta-card">⏳ AGUARDANDO APOIO<br>{sel_ups}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-alerta">⏳ AGUARDANDO ASSISTENTE<br>{sel_ups}</div>', unsafe_allow_html=True)
 
-# --- ABA DO ASSISTENTE (QUEM RESOLVE) ---
+# --- ABA ASSISTENTE ---
 with tabs[1]:
-    st.subheader("Chamados em Aberto")
+    st.subheader("Painel de Atendimento")
     if os.path.exists(DB_FILE):
         df_painel = pd.read_csv(DB_FILE)
         ativos = df_painel[df_painel['Status'] == "🔴 Aberto"]
         
         if ativos.empty:
-            st.success("✅ Tudo em ordem na produção.")
+            st.success("✅ Nenhuma pendência na produção.")
         else:
             for _, r in ativos.iterrows():
                 with st.container():
-                    st.error(f"**Célula: {r['Célula']}** | Início: {r['Início']}")
-                    st.write(f"Motivo: {r['Motivo']}")
+                    st.error(f"⚠️ **{r['Célula']}** | Início: {r['Início']}")
+                    st.write(f"Descrição: {r['Motivo']}")
                     
-                    if st.button(f"✅ ATENDER E FINALIZAR {r['Célula']}", key=f"fin_{r['ID']}"):
+                    if st.button(f"✅ FINALIZAR {r['Célula']}", key=f"btn_fin_{r['ID']}"):
                         df_painel.loc[df_painel['ID'] == r['ID'], 'Status'] = "🟢 Finalizado"
+                        # Opcional: registrar tempo final
                         df_painel.to_csv(DB_FILE, index=False)
                         st.rerun()
+
+# --- INFO DE CONFIGURAÇÃO ---
+st.sidebar.divider()
+st.sidebar.write("⚙️ **Configuração do Celular:**")
+st.sidebar.info(f"1. Instale o app **ntfy**\n2. Siga o tópico: **{NTFY_TOPIC}**\n3. No app, mude a prioridade para **MÁXIMA**.")
