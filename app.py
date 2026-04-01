@@ -146,7 +146,7 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
                         df_f.at[idx[0], 'Ação'] = ac if ac else "Atendimento Concluído"
                         df_f.at[idx[0], 'Minutos'] = round((ag - datetime.combine(ag.date(), h_ini.time())).total_seconds() / 60, 1)
                         df_f.to_csv(DB_FILE, index=False); st.rerun()
-        else: st.success("✅ Tudo em ordem!")
+        else: st.success("✅ Tudo em VALDEVIR!")
 
 elif st.session_state.pagina_ativa == "📊 Indicadores":
     if st.session_state.logado:
