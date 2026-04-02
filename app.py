@@ -37,7 +37,7 @@ if 'pagina_ativa' not in st.session_state:
 
 SENHA = "12345"
 
-# --- 2. ESTILO CSS E ALERTA FÍSICO (VIBRAÇÃO/SOM) ---
+# --- 2. ESTILO CSS E FUNÇÃO DE ALERTA ---
 st.markdown("""
     <style>
     @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
@@ -48,12 +48,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def disparar_alerta_fisico():
+    """JavaScript para Vibrar e Apitar apenas no Painel Assistente"""
     st.components.v1.html(
         """
         <script>
+        // Vibração
         if (window.navigator && window.navigator.vibrate) {
             window.navigator.vibrate([500, 200, 500]);
         }
+        // Som (Beep)
         var context = new (window.AudioContext || window.webkitAudioContext)();
         var osc = context.createOscillator();
         var gain = context.createGain();
@@ -80,9 +83,6 @@ dados = carregar_dados()
 hoje = get_br_time().strftime("%d/%m/%Y")
 ativos = dados[dados['Status'] == "🔴 Aberto"]
 resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
-
-if not ativos.empty:
-    disparar_alerta_fisico()
 
 # --- 4. MENU DE NAVEGAÇÃO ---
 menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
@@ -118,9 +118,10 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
         if st.button("Entrar"):
             if senha == SENHA: st.session_state.logado = True; st.rerun()
     else:
-        # --- AVISO PISCANTE NO TOPO DO PAINEL ---
+        # --- ALERTA VISUAL, SONORO E VIBRAÇÃO APENAS AQUI ---
         if not ativos.empty:
             st.markdown('<div class="alerta-piscante">⚠️ ATENÇÃO: HÁ CHAMADOS PENDENTES!</div>', unsafe_allow_html=True)
+            disparar_alerta_fisico() 
         
         m1, m2, m3 = st.columns(3)
         m1.metric("EM ABERTO", len(ativos))
@@ -163,7 +164,6 @@ elif st.session_state.pagina_ativa == "📊 Indicadores":
                 g1, g2 = st.columns(2)
                 with g1: st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por Célula", color_discrete_sequence=['#ff4b4b']), use_container_width=True)
                 with g2: st.plotly_chart(px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4), use_container_width=True)
-            else: st.warning("Sem dados para os filtros.")
 
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
