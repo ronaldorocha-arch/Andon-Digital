@@ -9,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 DB_FILE = "registro_paradas.csv"
 
 def get_br_time():
-    # Ajuste para o fuso horário de Brasília
+    # Ajuste para o fuso horário de Brasília (UTC-3)
     return datetime.utcnow() - timedelta(hours=3)
 
 def checar_ativos_rapido():
@@ -28,7 +28,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza a página a cada 5 segundos
+# Atualiza a página a cada 5 segundos (essencial para o tablet monitorar sozinho)
 st_autorefresh(interval=5000, key="datarefresh")
 
 if 'logado' not in st.session_state:
@@ -38,27 +38,26 @@ if 'pagina_ativa' not in st.session_state:
 
 SENHA = "12345"
 
-# --- 2. ESTILO CSS E FUNÇÕES JAVASCRIPT (VIBRAÇÃO) ---
+# --- 2. ESTILO CSS E ALERTA FÍSICO (VIBRAÇÃO/SOM) ---
 st.markdown("""
     <style>
     @keyframes piscar { 0% { background-color: #ff4b4b; } 50% { background-color: #7d0000; } 100% { background-color: #ff4b4b; } }
-    .alerta-piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white !important; text-align: center; margin-bottom: 20px; font-weight: 400 !important; }
-    [data-testid="stMetricValue"] { color: #000000 !important; font-size: 38px; font-weight: 400 !important; }
+    .alerta-piscante { animation: piscar 1s infinite; padding: 20px; border-radius: 10px; color: white !important; text-align: center; margin-bottom: 20px; }
+    [data-testid="stMetricValue"] { color: #000000 !important; font-size: 38px; }
     div.stButton > button:first-child { width: 100%; height: 50px; }
     </style>
     """, unsafe_allow_html=True)
 
 def disparar_alerta_fisico():
-    """Injeta JavaScript para fazer o tablet vibrar e emitir um bipe"""
+    """JavaScript para Vibrar e Apitar no Tablet/Celular"""
     st.components.v1.html(
         """
         <script>
-        // 1. Função de Vibração (Padrão: Vibra 500ms, pausa 200, vibra 500)
+        // Vibração: 500ms vibrando, 200ms pausa, 500ms vibrando
         if (window.navigator && window.navigator.vibrate) {
             window.navigator.vibrate([500, 200, 500]);
         }
-        
-        // 2. Função de Áudio (Bipe de 880Hz)
+        // Som: Beep de alerta
         var context = new (window.AudioContext || window.webkitAudioContext)();
         var osc = context.createOscillator();
         var gain = context.createGain();
@@ -79,7 +78,7 @@ def carregar_dados():
         return pd.DataFrame(columns=["ID", "Célula", "Motivo", "Descrição", "Início", "Fim", "Status", "Data", "Ação", "Minutos"])
     try:
         df = pd.read_csv(DB_FILE)
-        # Garante que a coluna Data seja tratada como string padronizada
+        # Padroniza a data para evitar erros de contagem (Dia/Mês/Ano)
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce').dt.strftime('%d/%m/%Y')
         return df.dropna(subset=['ID'])
     except:
@@ -88,18 +87,16 @@ def carregar_dados():
 dados = carregar_dados()
 hoje = get_br_time().strftime("%d/%m/%Y")
 
-# LÓGICA CORRIGIDA: Se houver erro de data no CSV, ele tenta pegar pelo menos o status
 ativos = dados[dados['Status'] == "🔴 Aberto"]
-# Aqui filtramos por status finalizado e data de hoje
 resolvidos_hoje = dados[(dados['Status'] == "🟢 Finalizado") & (dados['Data'] == hoje)]
 
-# Se houver paradas ativas, dispara o alerta físico (Vibração/Som)
+# Ativa o alerta físico se houver pendências
 if not ativos.empty:
     disparar_alerta_fisico()
 
 # --- 4. MENU DE NAVEGAÇÃO ---
 menu = ["📲 Terminal Operador", "💻 Painel Assistente", "📊 Indicadores", "📂 Relatórios"]
-escolha = st.radio("Selecione o Painel:", menu, horizontal=True, key="navegacao_principal")
+escolha = st.radio("Selecione o Painel:", menu, horizontal=True, key="nav_main")
 st.session_state.pagina_ativa = escolha
 st.divider()
 
@@ -120,7 +117,6 @@ if st.session_state.pagina_ativa == "📲 Terminal Operador":
         if st.button("🔔 ENVIAR CHAMADO", type="primary"):
             final_desc = f"{motivo_selecionado} - {obs_op}" if obs_op else motivo_selecionado
             nid = int(dados['ID'].max() + 1) if not dados.empty else 1
-            
             novo = pd.DataFrame([{
                 "ID": nid, "Célula": sel_ups, "Motivo": motivo_selecionado, 
                 "Descrição": final_desc, "Início": get_br_time().strftime("%H:%M:%S"), 
@@ -154,7 +150,8 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
                         df_f = pd.read_csv(DB_FILE)
                         idx = df_f[df_f['ID'] == r['ID']].index
                         ag = get_br_time()
-                        h_ini = datetime.strptime(df_f.at[idx[0], 'Início'], "%H:%M:%S")
+                        h_ini_str = df_f.at[idx[0], 'Início']
+                        h_ini = datetime.strptime(h_ini_str, "%H:%M:%S")
                         
                         df_f.at[idx[0], 'Fim'] = ag.strftime("%H:%M:%S")
                         df_f.at[idx[0], 'Status'] = "🟢 Finalizado"
@@ -169,9 +166,28 @@ elif st.session_state.pagina_ativa == "💻 Painel Assistente":
 
 elif st.session_state.pagina_ativa == "📊 Indicadores":
     if st.session_state.logado:
+        st.subheader("🔍 Filtros de Análise")
         if not dados.empty:
-            df_i = dados[dados['Status'] == "🟢 Finalizado"].copy()
-            st.plotly_chart(px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Chamados por Célula"), use_container_width=True)
+            c_f1, c_f2 = st.columns(2)
+            d_list = sorted(list(set(dados['Data'].unique())), reverse=True)
+            s_d = c_f1.multiselect("Filtrar por Datas:", d_list, default=[hoje] if hoje in d_list else [])
+            s_u = c_f2.multiselect("Filtrar por Células:", sorted(dados['Célula'].unique()))
+            
+            df_i = dados.copy()
+            if s_d: df_i = df_i[df_i['Data'].isin(s_d)]
+            if s_u: df_i = df_i[df_i['Célula'].isin(s_u)]
+            
+            if not df_i.empty:
+                st.divider()
+                g1, g2 = st.columns(2)
+                with g1:
+                    fig_bar = px.bar(df_i['Célula'].value_counts().reset_index(), x='Célula', y='count', title="Por Célula", color_discrete_sequence=['#ff4b4b'])
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                with g2:
+                    fig_pie = px.pie(df_i, names='Motivo', title="Por Motivo", hole=0.4)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.warning("Sem dados para os filtros selecionados.")
 
 elif st.session_state.pagina_ativa == "📂 Relatórios":
     if st.session_state.logado:
